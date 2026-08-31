@@ -1,6 +1,6 @@
 """
 ===============================================================================
-PROJETO: OmniOverlay - Multi-Account HUD & Web Hub (Refatorado & Estável)
+PROJETO: OmniOverlay - Multi-Account HUD (IA, Navegador & Spotify Corrigidos)
 ===============================================================================
 """
 
@@ -8,9 +8,9 @@ import json
 import os
 import threading
 import time
+import urllib.parse
 import tkinter as tk
 import customtkinter as ctk
-from PIL import Image
 from pynput import keyboard
 from tkinterweb import HtmlFrame
 from google import genai
@@ -42,7 +42,6 @@ class AccountManager:
             except Exception as e:
                 print(f"[ERRO] Falha ao ler {CONFIG_FILE}: {e}")
 
-        # Estrutura inicial padrão
         dados_padrao = {
             "perfis": [
                 {
@@ -68,16 +67,14 @@ class AccountManager:
 
 
 class ProfileSelectorFrame(ctk.CTkFrame):
-    """Tela de Seleção e Criação de Perfis (Steam Style)."""
+    """Tela de Seleção e Criação de Perfis."""
 
     def __init__(self, parent, controller):
         super().__init__(parent, fg_color="#0F172A", corner_radius=12)
         self.controller = controller
-
         self.criar_interface()
 
     def criar_interface(self):
-        # Header
         header = ctk.CTkFrame(self, fg_color="#1E293B", height=50, corner_radius=0)
         header.pack(fill="x")
 
@@ -100,11 +97,9 @@ class ProfileSelectorFrame(ctk.CTkFrame):
         )
         btn_fechar.pack(side="right", padx=12)
 
-        # Container de Perfis
         self.scroll_perfis = ctk.CTkScrollableFrame(self, fg_color="transparent")
         self.scroll_perfis.pack(fill="both", expand=True, padx=20, pady=15)
 
-        # Form para Criar Nova Conta
         frame_criar = ctk.CTkFrame(self, fg_color="#1E293B", corner_radius=12)
         frame_criar.pack(fill="x", padx=20, pady=(0, 20))
 
@@ -213,6 +208,7 @@ class DashboardFrame(ctk.CTkFrame):
 
         self._offset_x = 0
         self._offset_y = 0
+        self.modo_cinema_ativo = False
         self.dynamic_accent_buttons = []
 
         self.criar_interface()
@@ -252,6 +248,20 @@ class DashboardFrame(ctk.CTkFrame):
         )
         self.lbl_titulo.pack(side="left", padx=2)
 
+        # Botão Modo Cinema
+        self.btn_modo_cinema = ctk.CTkButton(
+            self.header_frame,
+            text="🎬 Modo Cinema",
+            width=110,
+            height=32,
+            corner_radius=8,
+            fg_color="#9333EA",
+            hover_color="#7E22CE",
+            font=("Segoe UI", 10, "bold"),
+            command=self.toggle_modo_cinema,
+        )
+        self.btn_modo_cinema.pack(side="right", padx=(4, 8))
+
         btn_trocar_conta = ctk.CTkButton(
             self.header_frame,
             text="🔄 Trocar Conta",
@@ -263,7 +273,7 @@ class DashboardFrame(ctk.CTkFrame):
             font=("Segoe UI", 10, "bold"),
             command=self.controller.abrir_seletor_perfis,
         )
-        btn_trocar_conta.pack(side="right", padx=(4, 12))
+        btn_trocar_conta.pack(side="right", padx=4)
 
         btn_fechar = ctk.CTkButton(
             self.header_frame,
@@ -277,7 +287,7 @@ class DashboardFrame(ctk.CTkFrame):
         )
         btn_fechar.pack(side="right", padx=4)
 
-        # Barra de Pesquisa Universal
+        # Barra de Pesquisa Universal (Otimizada para HTML leve)
         self.frame_busca = ctk.CTkFrame(
             self,
             fg_color="#1E293B",
@@ -289,7 +299,7 @@ class DashboardFrame(ctk.CTkFrame):
 
         self.entry_universal = ctk.CTkEntry(
             self.frame_busca,
-            placeholder_text="Pesquise no Google ou digite uma URL...",
+            placeholder_text="Pesquise na web ou digite um link (ex: wikipedia.org)...",
             height=38,
             corner_radius=8,
             fg_color="#334155",
@@ -323,11 +333,13 @@ class DashboardFrame(ctk.CTkFrame):
         self.tabview.pack(fill="both", expand=True, padx=16, pady=(8, 16))
 
         self.tab_web = self.tabview.add("🌐 Navegador")
+        self.tab_spotify = self.tabview.add("🎵 Spotify Player")
         self.tab_streaming = self.tabview.add("🎬 Streaming")
         self.tab_ai = self.tabview.add("🤖 Assistente IA")
         self.tab_config = self.tabview.add("⚙️ Configurações")
 
         self.montar_aba_navegador()
+        self.montar_aba_spotify()
         self.montar_aba_streaming()
         self.montar_aba_ai()
         self.montar_aba_config()
@@ -352,9 +364,27 @@ class DashboardFrame(ctk.CTkFrame):
         self._offset_y = event.y
 
     def arrastar_janela(self, event):
-        x = self.controller.winfo_x() + (event.x - self._offset_x)
-        y = self.controller.winfo_y() + (event.y - self._offset_y)
-        self.controller.geometry(f"+{x}+{y}")
+        if not self.modo_cinema_ativo:
+            x = self.controller.winfo_x() + (event.x - self._offset_x)
+            y = self.controller.winfo_y() + (event.y - self._offset_y)
+            self.controller.geometry(f"+{x}+{y}")
+
+    def toggle_modo_cinema(self):
+        self.modo_cinema_ativo = not self.modo_cinema_ativo
+
+        if self.modo_cinema_ativo:
+            self.controller.attributes("-alpha", 0.85)
+            self.frame_busca.pack_forget()
+            self.btn_modo_cinema.configure(text="❌ Sair Cinema", fg_color="#DC2626", hover_color="#B91C1C")
+            
+            ws = self.controller.winfo_screenwidth()
+            hs = self.controller.winfo_screenheight()
+            self.controller.geometry(f"{ws}x{hs}+0+0")
+        else:
+            self.controller.attributes("-alpha", 0.98)
+            self.frame_busca.pack(fill="x", padx=16, pady=4, after=self.header_frame)
+            self.btn_modo_cinema.configure(text="🎬 Modo Cinema", fg_color="#9333EA", hover_color="#7E22CE")
+            self.controller.centralizar_janela(920, 800)
 
     def montar_aba_navegador(self):
         nav_bar = ctk.CTkFrame(self.tab_web, fg_color="transparent")
@@ -384,7 +414,63 @@ class DashboardFrame(ctk.CTkFrame):
 
         self.browser = HtmlFrame(self.tab_web)
         self.browser.pack(fill="both", expand=True)
-        self.browser.load_website("https://www.google.com")
+        # DuckDuckGo Lite para carregamento ultra-rápido e compatível com Tkinter
+        self.browser.load_website("https://lite.duckduckgo.com/lite/")
+
+    def montar_aba_spotify(self):
+        """Player do Spotify Embutido Ultraleve e Integrado."""
+        frame_controles = ctk.CTkFrame(self.tab_spotify, fg_color="transparent")
+        frame_controles.pack(fill="x", pady=6)
+
+        ctk.CTkLabel(
+            frame_controles,
+            text="Cole o Link de uma Música/Playlist do Spotify:",
+            font=("Segoe UI", 11, "bold"),
+            text_color="#1DB954"
+        ).pack(side="left", padx=8)
+
+        self.entry_spotify_url = ctk.CTkEntry(
+            frame_controles,
+            placeholder_text="https://open.spotify.com/track/...",
+            height=32,
+            fg_color="#334155",
+            text_color="#F8FAFC"
+        )
+        self.entry_spotify_url.pack(side="left", fill="x", expand=True, padx=8)
+
+        btn_carregar_spot = ctk.CTkButton(
+            frame_controles,
+            text="Tocar 🎵",
+            width=80,
+            height=32,
+            fg_color="#1DB954",
+            hover_color="#1AA34A",
+            command=self.carregar_embed_spotify
+        )
+        btn_carregar_spot.pack(side="right", padx=8)
+
+        self.spotify_browser = HtmlFrame(self.tab_spotify)
+        self.spotify_browser.pack(fill="both", expand=True, pady=6)
+        
+        # Player Padrão do Spotify Embutido (Playlist Top Hits Brasil)
+        self.carregar_embed_spotify("https://open.spotify.com/playlist/37i9dQZF1DX0FO21A2R1ch")
+
+    def carregar_embed_spotify(self, url_custom=None):
+        url = url_custom or self.entry_spotify_url.get().strip()
+        if not url:
+            return
+
+        # Converte links padrão do Spotify para versão Embed compacta
+        embed_url = url.replace("open.spotify.com/", "open.spotify.com/embed/")
+        
+        html_code = f"""
+        <html>
+        <body style="background-color:#0F172A; margin:0; padding:10px; display:flex; justify-content:center; align-items:center;">
+            <iframe src="{embed_url}" width="100%" height="450" frameborder="0" allowtransparency="true" allow="encrypted-media"></iframe>
+        </body>
+        </html>
+        """
+        self.spotify_browser.load_html(html_code)
 
     def montar_aba_streaming(self):
         grid_frame = ctk.CTkFrame(self.tab_streaming, fg_color="transparent")
@@ -392,9 +478,9 @@ class DashboardFrame(ctk.CTkFrame):
 
         servicos = [
             ("🔴 Netflix", "https://www.netflix.com", "#E50914"),
-            ("▶️ YouTube", "https://www.youtube.com", "#FF0000"),
+            ("▶️ YouTube", "https://m.youtube.com", "#FF0000"),
             ("✨ Disney+", "https://www.disneyplus.com", "#113CCF"),
-            ("💜 Twitch", "https://www.twitch.tv", "#9146FF"),
+            ("💜 Twitch", "https://m.twitch.tv", "#9146FF"),
             ("📦 Prime Video", "https://www.primevideo.com", "#00A8E1"),
             ("🟣 Max", "https://www.max.com", "#002BE7"),
         ]
@@ -513,6 +599,7 @@ class DashboardFrame(ctk.CTkFrame):
             self.controller.perfil_ativo["gemini_key"] = nova_key
             AccountManager.salvar_dados(self.controller.dados_config)
             self.controller.atualizar_gemini_client(nova_key)
+            self.chat_history.insert("end", "Sistema: Chave de API atualizada com sucesso!\n\n")
 
     def enviar_mensagem_ai(self):
         msg = self.entry_chat.get().strip()
@@ -535,11 +622,18 @@ class DashboardFrame(ctk.CTkFrame):
                     model="gemini-2.5-flash",
                     contents=msg,
                 )
-                self.chat_history.insert("end", f"Gemini: {resposta.text}\n\n")
+                texto_resposta = resposta.text
             except Exception as e:
-                self.chat_history.insert("end", f"Erro: {e}\n\n")
+                texto_resposta = f"Erro na requisição: {e}"
+
+            # Atualização segura na Thread principal
+            self.after(0, lambda: self._atualizar_chat_resposta(texto_resposta))
 
         threading.Thread(target=processar, daemon=True).start()
+
+    def _atualizar_chat_resposta(self, texto):
+        self.chat_history.insert("end", f"Gemini: {texto}\n\n")
+        self.chat_history.see("end")
 
     def navegar_para(self, url):
         self.tabview.set("🌐 Navegador")
@@ -556,7 +650,8 @@ class DashboardFrame(ctk.CTkFrame):
         elif "." in query and " " not in query:
             url = f"https://{query}"
         else:
-            url = f"https://www.google.com/search?q={query}"
+            query_encoded = urllib.parse.quote_plus(query)
+            url = f"https://html.duckduckgo.com/html/?q={query_encoded}"
 
         self.browser.load_website(url)
 
@@ -577,11 +672,9 @@ class OmniOverlay(ctk.CTk):
         self.gemini_client = None
         self.visivel = True
 
-        # Instanciação das Telas Principais (Frames)
         self.frame_seletor = ProfileSelectorFrame(self, self)
         self.frame_dashboard = DashboardFrame(self, self)
 
-        # Abre na tela de seleção por padrão
         self.abrir_seletor_perfis()
 
     def centralizar_janela(self, largura, altura):
@@ -665,7 +758,6 @@ def escutar_teclado(app):
 if __name__ == "__main__":
     app = OmniOverlay()
 
-    # Thread separada para o atalho de ocultar/exibir (Alt + Z)
     thread_teclado = threading.Thread(
         target=escutar_teclado, args=(app,), daemon=True
     )
