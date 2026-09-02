@@ -1,35 +1,43 @@
 """
 ===============================================================================
-PROJETO: OmniOverlay - Multi-Account HUD (IA, Navegador & Spotify Corrigidos)
+PROJETO: OmniOverlay - Premium Theme Engine & Dynamic Shortcut Manager
 ===============================================================================
 """
 
 import json
 import os
+import subprocess
 import threading
 import time
 import urllib.parse
+import webbrowser
 import tkinter as tk
+from tkinter import filedialog
 import customtkinter as ctk
+from PIL import Image
 from pynput import keyboard
-from tkinterweb import HtmlFrame
 from google import genai
 
-# Configuração visual global
-ctk.set_appearance_mode("dark")
+CONFIG_FILE = "app_config.json"
 
-COLOR_THEMES = {
+# Tuplas globais de cores para garantir compatibilidade nos dois modos: ("CLARO", "ESCURO")
+COLOR_TEXT_PRIMARY = ("#0F172A", "#F8FAFC")
+COLOR_TEXT_SECONDARY = ("#475569", "#94A3B8")
+COLOR_BG_SURFACE = ("#FFFFFF", "#151C28")
+COLOR_BG_CARD = ("#E2E8F0", "#1E293B")
+COLOR_INPUT_BG = ("#FFFFFF", "#0F172A")
+COLOR_BORDER = ("#CBD5E1", "#334155")
+
+COLOR_ACCENTS = {
     "azul": {"primary": "#2563EB", "hover": "#1D4ED8"},
     "vermelho": {"primary": "#DC2626", "hover": "#B91C1C"},
     "verde": {"primary": "#16A34A", "hover": "#15803D"},
     "roxo": {"primary": "#9333EA", "hover": "#7E22CE"},
 }
 
-CONFIG_FILE = "app_config.json"
-
 
 class AccountManager:
-    """Gerencia a leitura e escrita das contas no disco."""
+    """Gerencia leitura e gravação dos perfis e atalhos."""
 
     @staticmethod
     def carregar_dados():
@@ -38,9 +46,14 @@ class AccountManager:
                 with open(CONFIG_FILE, "r", encoding="utf-8") as f:
                     dados = json.load(f)
                     if "perfis" in dados and len(dados["perfis"]) > 0:
+                        for p in dados["perfis"]:
+                            if "atalhos_custom" not in p:
+                                p["atalhos_custom"] = []
+                            if "foto_perfil" not in p:
+                                p["foto_perfil"] = ""
                         return dados
             except Exception as e:
-                print(f"[ERRO] Falha ao ler {CONFIG_FILE}: {e}")
+                print(f"[ERRO] Falha ao ler arquivo de configuração: {e}")
 
         dados_padrao = {
             "perfis": [
@@ -48,7 +61,9 @@ class AccountManager:
                     "id": "p1",
                     "nome": "Jogador Principal",
                     "cor_acento": "azul",
-                    "gemini_key": ""
+                    "gemini_key": "",
+                    "foto_perfil": "",
+                    "atalhos_custom": []
                 }
             ],
             "ultimo_perfil": "p1",
@@ -63,26 +78,26 @@ class AccountManager:
             with open(CONFIG_FILE, "w", encoding="utf-8") as f:
                 json.dump(dados, f, indent=4, ensure_ascii=False)
         except Exception as e:
-            print(f"[ERRO] Falha ao salvar em {CONFIG_FILE}: {e}")
+            print(f"[ERRO] Falha ao salvar arquivo de configuração: {e}")
 
 
 class ProfileSelectorFrame(ctk.CTkFrame):
-    """Tela de Seleção e Criação de Perfis."""
+    """Tela de Seleção de Perfis."""
 
     def __init__(self, parent, controller):
-        super().__init__(parent, fg_color="#0F172A", corner_radius=12)
+        super().__init__(parent, fg_color=("#F1F5F9", "#0B0F17"), corner_radius=12)
         self.controller = controller
         self.criar_interface()
 
     def criar_interface(self):
-        header = ctk.CTkFrame(self, fg_color="#1E293B", height=50, corner_radius=0)
+        header = ctk.CTkFrame(self, fg_color=COLOR_BG_SURFACE, height=50, corner_radius=0)
         header.pack(fill="x")
 
         lbl_titulo = ctk.CTkLabel(
             header,
             text="🎮 Escolha sua Conta",
             font=("Segoe UI", 14, "bold"),
-            text_color="#F8FAFC",
+            text_color=COLOR_TEXT_PRIMARY,
         )
         lbl_titulo.pack(side="left", padx=16, pady=12)
 
@@ -93,6 +108,7 @@ class ProfileSelectorFrame(ctk.CTkFrame):
             height=30,
             fg_color="#EF4444",
             hover_color="#DC2626",
+            text_color="#FFFFFF",
             command=self.controller.destroy,
         )
         btn_fechar.pack(side="right", padx=12)
@@ -100,22 +116,23 @@ class ProfileSelectorFrame(ctk.CTkFrame):
         self.scroll_perfis = ctk.CTkScrollableFrame(self, fg_color="transparent")
         self.scroll_perfis.pack(fill="both", expand=True, padx=20, pady=15)
 
-        frame_criar = ctk.CTkFrame(self, fg_color="#1E293B", corner_radius=12)
+        frame_criar = ctk.CTkFrame(self, fg_color=COLOR_BG_SURFACE, corner_radius=12)
         frame_criar.pack(fill="x", padx=20, pady=(0, 20))
 
         ctk.CTkLabel(
             frame_criar,
             text="Criar Nova Conta",
             font=("Segoe UI", 11, "bold"),
-            text_color="#94A3B8"
+            text_color=COLOR_TEXT_SECONDARY
         ).pack(anchor="w", padx=12, pady=(8, 2))
 
         self.entry_novo_nome = ctk.CTkEntry(
             frame_criar,
             placeholder_text="Nome da conta...",
             height=36,
-            fg_color="#0F172A",
-            border_color="#334155"
+            fg_color=COLOR_INPUT_BG,
+            text_color=COLOR_TEXT_PRIMARY,
+            border_color=COLOR_BORDER
         )
         self.entry_novo_nome.pack(fill="x", padx=12, pady=4)
         self.entry_novo_nome.bind("<Return>", lambda e: self.acao_criar_perfil())
@@ -127,6 +144,7 @@ class ProfileSelectorFrame(ctk.CTkFrame):
             corner_radius=8,
             fg_color="#2563EB",
             hover_color="#1D4ED8",
+            text_color="#FFFFFF",
             font=("Segoe UI", 11, "bold"),
             command=self.acao_criar_perfil,
         )
@@ -139,17 +157,27 @@ class ProfileSelectorFrame(ctk.CTkFrame):
         perfis = self.controller.dados_config.get("perfis", [])
 
         for perfil in perfis:
-            card = ctk.CTkFrame(self.scroll_perfis, fg_color="#1E293B", corner_radius=12)
+            card = ctk.CTkFrame(self.scroll_perfis, fg_color=COLOR_BG_CARD, corner_radius=12)
             card.pack(fill="x", pady=6, ipady=4)
+
+            foto_path = perfil.get("foto_perfil", "")
+            img_avatar = None
+            if foto_path and os.path.exists(foto_path):
+                try:
+                    pil_img = Image.open(foto_path)
+                    img_avatar = ctk.CTkImage(light_image=pil_img, dark_image=pil_img, size=(36, 36))
+                except Exception:
+                    img_avatar = None
 
             lbl_avatar = ctk.CTkLabel(
                 card,
-                text="👤",
+                text="" if img_avatar else "👤",
+                image=img_avatar,
                 width=42,
                 height=42,
                 corner_radius=21,
-                fg_color="#334155",
-                text_color="#FFFFFF",
+                fg_color=("#E2E8F0", "#334155"),
+                text_color=COLOR_TEXT_PRIMARY,
                 font=("Segoe UI", 16),
             )
             lbl_avatar.pack(side="left", padx=12)
@@ -161,7 +189,7 @@ class ProfileSelectorFrame(ctk.CTkFrame):
                 info_frame,
                 text=perfil["nome"],
                 font=("Segoe UI", 12, "bold"),
-                text_color="#F8FAFC",
+                text_color=COLOR_TEXT_PRIMARY,
                 anchor="w",
             )
             lbl_nome.pack(fill="x", pady=(12, 0))
@@ -174,6 +202,7 @@ class ProfileSelectorFrame(ctk.CTkFrame):
                 corner_radius=6,
                 fg_color="#16A34A",
                 hover_color="#15803D",
+                text_color="#FFFFFF",
                 font=("Segoe UI", 11, "bold"),
                 command=lambda p=perfil: self.controller.entrar_no_perfil(p),
             )
@@ -189,7 +218,9 @@ class ProfileSelectorFrame(ctk.CTkFrame):
             "id": novo_id,
             "nome": nome,
             "cor_acento": "azul",
-            "gemini_key": ""
+            "gemini_key": "",
+            "foto_perfil": "",
+            "atalhos_custom": []
         }
 
         self.controller.dados_config["perfis"].append(novo_perfil)
@@ -200,26 +231,27 @@ class ProfileSelectorFrame(ctk.CTkFrame):
 
 
 class DashboardFrame(ctk.CTkFrame):
-    """Tela Principal do Dashboard / Overlay."""
+    """Painel Principal Dashboard Overlay."""
 
     def __init__(self, parent, controller):
-        super().__init__(parent, fg_color="#0F172A", corner_radius=12)
+        super().__init__(parent, fg_color=("#F1F5F9", "#0B0F17"), corner_radius=12)
         self.controller = controller
 
         self._offset_x = 0
         self._offset_y = 0
         self.modo_cinema_ativo = False
         self.dynamic_accent_buttons = []
+        self.icone_foto_temp = ""
 
         self.criar_interface()
 
     def criar_interface(self):
-        # Header Superior
+        # Header
         self.header_frame = ctk.CTkFrame(
             self,
-            fg_color="#1E293B",
+            fg_color=COLOR_BG_SURFACE,
             corner_radius=12,
-            border_color="#334155",
+            border_color=COLOR_BORDER,
             border_width=1,
             height=60,
         )
@@ -228,48 +260,68 @@ class DashboardFrame(ctk.CTkFrame):
         self.header_frame.bind("<Button-1>", self.iniciar_arraste)
         self.header_frame.bind("<B1-Motion>", self.arrastar_janela)
 
-        self.lbl_avatar = ctk.CTkLabel(
+        # Botão Perfil
+        self.btn_avatar = ctk.CTkButton(
             self.header_frame,
             text="👤",
             width=42,
             height=42,
             corner_radius=21,
-            fg_color="#3B82F6",
+            fg_color="#2563EB",
+            hover_color="#1D4ED8",
             text_color="#FFFFFF",
-            font=("Segoe UI", 18),
+            font=("Segoe UI", 16),
+            command=self.trocar_foto_perfil,
         )
-        self.lbl_avatar.pack(side="left", padx=(12, 10))
+        self.btn_avatar.pack(side="left", padx=(12, 10))
 
         self.lbl_titulo = ctk.CTkLabel(
             self.header_frame,
             text="OmniOverlay",
             font=("Segoe UI", 14, "bold"),
-            text_color="#F8FAFC",
+            text_color=COLOR_TEXT_PRIMARY,
         )
         self.lbl_titulo.pack(side="left", padx=2)
+
+        # Botão Tema Claro/Escuro
+        self.btn_tema = ctk.CTkButton(
+            self.header_frame,
+            text="☀️ Modo Claro" if self.controller.modo_tema_atual == "dark" else "🌙 Modo Escuro",
+            width=110,
+            height=32,
+            corner_radius=8,
+            fg_color=("#CBD5E1", "#334155"),
+            hover_color=("#94A3B8", "#475569"),
+            text_color=COLOR_TEXT_PRIMARY,
+            font=("Segoe UI", 10, "bold"),
+            command=self.controller.alternar_tema_global,
+        )
+        self.btn_tema.pack(side="right", padx=(4, 8))
 
         # Botão Modo Cinema
         self.btn_modo_cinema = ctk.CTkButton(
             self.header_frame,
-            text="🎬 Modo Cinema",
-            width=110,
+            text="🎬 Cinema",
+            width=90,
             height=32,
             corner_radius=8,
             fg_color="#9333EA",
             hover_color="#7E22CE",
+            text_color="#FFFFFF",
             font=("Segoe UI", 10, "bold"),
             command=self.toggle_modo_cinema,
         )
-        self.btn_modo_cinema.pack(side="right", padx=(4, 8))
+        self.btn_modo_cinema.pack(side="right", padx=4)
 
         btn_trocar_conta = ctk.CTkButton(
             self.header_frame,
-            text="🔄 Trocar Conta",
-            width=110,
+            text="🔄 Contas",
+            width=90,
             height=32,
             corner_radius=8,
-            fg_color="#334155",
-            hover_color="#475569",
+            fg_color=("#CBD5E1", "#334155"),
+            hover_color=("#94A3B8", "#475569"),
+            text_color=COLOR_TEXT_PRIMARY,
             font=("Segoe UI", 10, "bold"),
             command=self.controller.abrir_seletor_perfis,
         )
@@ -283,39 +335,53 @@ class DashboardFrame(ctk.CTkFrame):
             corner_radius=8,
             fg_color="#EF4444",
             hover_color="#DC2626",
+            text_color="#FFFFFF",
             command=self.controller.destroy,
         )
         btn_fechar.pack(side="right", padx=4)
 
-        # Barra de Pesquisa Universal (Otimizada para HTML leve)
+        # Barra de Pesquisa / Lançador Universal
         self.frame_busca = ctk.CTkFrame(
             self,
-            fg_color="#1E293B",
+            fg_color=COLOR_BG_SURFACE,
             corner_radius=12,
-            border_color="#334155",
+            border_color=COLOR_BORDER,
             border_width=1,
         )
         self.frame_busca.pack(fill="x", padx=16, pady=4)
 
         self.entry_universal = ctk.CTkEntry(
             self.frame_busca,
-            placeholder_text="Pesquise na web ou digite um link (ex: wikipedia.org)...",
+            placeholder_text="Cole um Link Web ou o caminho de um Programa (.exe) para abrir...",
             height=38,
             corner_radius=8,
-            fg_color="#334155",
-            text_color="#F8FAFC",
-            border_color="#334155",
+            fg_color=COLOR_INPUT_BG,
+            text_color=COLOR_TEXT_PRIMARY,
+            border_color=COLOR_BORDER,
             font=("Segoe UI", 11),
         )
         self.entry_universal.pack(side="left", fill="x", expand=True, padx=8, pady=8)
         self.entry_universal.bind("<Return>", lambda e: self.executar_busca_universal())
 
-        btn_executar = ctk.CTkButton(
+        btn_procurar_arquivo = ctk.CTkButton(
             self.frame_busca,
-            text="Buscar 🔍",
+            text="📁 Buscar App",
             width=100,
             height=38,
+            fg_color=("#CBD5E1", "#334155"),
+            hover_color=("#94A3B8", "#475569"),
+            text_color=COLOR_TEXT_PRIMARY,
+            command=self.selecionar_executavel_direto,
+        )
+        btn_procurar_arquivo.pack(side="right", padx=(0, 4), pady=8)
+
+        btn_executar = ctk.CTkButton(
+            self.frame_busca,
+            text="Abrir 🚀",
+            width=90,
+            height=38,
             corner_radius=8,
+            text_color="#FFFFFF",
             font=("Segoe UI", 11, "bold"),
             command=self.executar_busca_universal,
         )
@@ -326,21 +392,18 @@ class DashboardFrame(ctk.CTkFrame):
         self.tabview = ctk.CTkTabview(
             self,
             corner_radius=12,
-            fg_color="#1E293B",
-            border_color="#334155",
+            fg_color=COLOR_BG_SURFACE,
+            border_color=COLOR_BORDER,
             border_width=1,
+            text_color=COLOR_TEXT_PRIMARY,
         )
         self.tabview.pack(fill="both", expand=True, padx=16, pady=(8, 16))
 
-        self.tab_web = self.tabview.add("🌐 Navegador")
-        self.tab_spotify = self.tabview.add("🎵 Spotify Player")
-        self.tab_streaming = self.tabview.add("🎬 Streaming")
+        self.tab_hub = self.tabview.add("🚀 Central de Atalhos")
         self.tab_ai = self.tabview.add("🤖 Assistente IA")
         self.tab_config = self.tabview.add("⚙️ Configurações")
 
-        self.montar_aba_navegador()
-        self.montar_aba_spotify()
-        self.montar_aba_streaming()
+        self.montar_aba_hub()
         self.montar_aba_ai()
         self.montar_aba_config()
 
@@ -349,9 +412,33 @@ class DashboardFrame(ctk.CTkFrame):
         self.entry_api_key.delete(0, "end")
         self.entry_api_key.insert(0, perfil.get("gemini_key", ""))
         self.aplicar_cor_acento(perfil.get("cor_acento", "azul"))
+        self.atualizar_foto_avatar(perfil.get("foto_perfil", ""))
+        self.atualizar_atalhos_customizados()
+
+    def atualizar_foto_avatar(self, foto_path):
+        if foto_path and os.path.exists(foto_path):
+            try:
+                pil_img = Image.open(foto_path)
+                img_avatar = ctk.CTkImage(light_image=pil_img, dark_image=pil_img, size=(32, 32))
+                self.btn_avatar.configure(image=img_avatar, text="")
+                return
+            except Exception as e:
+                print(f"[ERRO] Falha ao carregar avatar: {e}")
+
+        self.btn_avatar.configure(image="", text="👤")
+
+    def trocar_foto_perfil(self):
+        caminho = filedialog.askopenfilename(
+            title="Escolha sua Foto de Perfil",
+            filetypes=[("Imagens", "*.png *.jpg *.jpeg *.ico *.bmp")]
+        )
+        if caminho and self.controller.perfil_ativo:
+            self.controller.perfil_ativo["foto_perfil"] = caminho
+            AccountManager.salvar_dados(self.controller.dados_config)
+            self.atualizar_foto_avatar(caminho)
 
     def aplicar_cor_acento(self, nome_cor):
-        cor = COLOR_THEMES.get(nome_cor, COLOR_THEMES["azul"])
+        cor = COLOR_ACCENTS.get(nome_cor, COLOR_ACCENTS["azul"])
         for btn in self.dynamic_accent_buttons:
             btn.configure(fg_color=cor["primary"], hover_color=cor["hover"])
 
@@ -373,7 +460,7 @@ class DashboardFrame(ctk.CTkFrame):
         self.modo_cinema_ativo = not self.modo_cinema_ativo
 
         if self.modo_cinema_ativo:
-            self.controller.attributes("-alpha", 0.85)
+            self.controller.attributes("-alpha", 1.0)
             self.frame_busca.pack_forget()
             self.btn_modo_cinema.configure(text="❌ Sair Cinema", fg_color="#DC2626", hover_color="#B91C1C")
             
@@ -383,122 +470,331 @@ class DashboardFrame(ctk.CTkFrame):
         else:
             self.controller.attributes("-alpha", 0.98)
             self.frame_busca.pack(fill="x", padx=16, pady=4, after=self.header_frame)
-            self.btn_modo_cinema.configure(text="🎬 Modo Cinema", fg_color="#9333EA", hover_color="#7E22CE")
+            self.btn_modo_cinema.configure(text="🎬 Cinema", fg_color="#9333EA", hover_color="#7E22CE")
             self.controller.centralizar_janela(920, 800)
 
-    def montar_aba_navegador(self):
-        nav_bar = ctk.CTkFrame(self.tab_web, fg_color="transparent")
-        nav_bar.pack(fill="x", pady=(0, 6))
+    def montar_aba_hub(self):
+        self.scroll_hub = ctk.CTkScrollableFrame(self.tab_hub, fg_color="transparent")
+        self.scroll_hub.pack(fill="both", expand=True, padx=8, pady=8)
 
-        btn_voltar = ctk.CTkButton(
-            nav_bar,
-            text="◄ Voltar",
-            width=70,
-            height=30,
-            fg_color="#334155",
-            text_color="#F8FAFC",
-            command=lambda: self.browser.go_back(),
-        )
-        btn_voltar.pack(side="left", padx=2)
-
-        btn_avancar = ctk.CTkButton(
-            nav_bar,
-            text="Avançar ►",
-            width=70,
-            height=30,
-            fg_color="#334155",
-            text_color="#F8FAFC",
-            command=lambda: self.browser.go_forward(),
-        )
-        btn_avancar.pack(side="left", padx=2)
-
-        self.browser = HtmlFrame(self.tab_web)
-        self.browser.pack(fill="both", expand=True)
-        # DuckDuckGo Lite para carregamento ultra-rápido e compatível com Tkinter
-        self.browser.load_website("https://lite.duckduckgo.com/lite/")
-
-    def montar_aba_spotify(self):
-        """Player do Spotify Embutido Ultraleve e Integrado."""
-        frame_controles = ctk.CTkFrame(self.tab_spotify, fg_color="transparent")
-        frame_controles.pack(fill="x", pady=6)
+        # PAINEL DE CRIAÇÃO E ADIÇÃO DINÂMICA
+        frame_adicionar = ctk.CTkFrame(self.scroll_hub, fg_color=COLOR_BG_CARD, corner_radius=10)
+        frame_adicionar.pack(fill="x", pady=(0, 16), padx=4, ipady=8)
 
         ctk.CTkLabel(
-            frame_controles,
-            text="Cole o Link de uma Música/Playlist do Spotify:",
-            font=("Segoe UI", 11, "bold"),
-            text_color="#1DB954"
-        ).pack(side="left", padx=8)
+            frame_adicionar,
+            text="➕ Criar e Personalizar Novo Atalho / App",
+            font=("Segoe UI", 12, "bold"),
+            text_color=("#0284C7", "#38BDF8")
+        ).pack(anchor="w", padx=12, pady=(8, 4))
 
-        self.entry_spotify_url = ctk.CTkEntry(
-            frame_controles,
-            placeholder_text="https://open.spotify.com/track/...",
-            height=32,
-            fg_color="#334155",
-            text_color="#F8FAFC"
+        form_top = ctk.CTkFrame(frame_adicionar, fg_color="transparent")
+        form_top.pack(fill="x", padx=8, pady=2)
+
+        self.entry_nome_atalho = ctk.CTkEntry(
+            form_top,
+            placeholder_text="Nome do Atalho...",
+            height=34,
+            fg_color=COLOR_INPUT_BG,
+            text_color=COLOR_TEXT_PRIMARY,
+            border_color=COLOR_BORDER
         )
-        self.entry_spotify_url.pack(side="left", fill="x", expand=True, padx=8)
+        self.entry_nome_atalho.pack(side="left", fill="x", expand=True, padx=4)
 
-        btn_carregar_spot = ctk.CTkButton(
-            frame_controles,
-            text="Tocar 🎵",
+        self.entry_url_atalho = ctk.CTkEntry(
+            form_top,
+            placeholder_text="Link Web ou Caminho do App (.exe)...",
+            height=34,
+            fg_color=COLOR_INPUT_BG,
+            text_color=COLOR_TEXT_PRIMARY,
+            border_color=COLOR_BORDER
+        )
+        self.entry_url_atalho.pack(side="left", fill="x", expand=True, padx=4)
+
+        btn_browse_app = ctk.CTkButton(
+            form_top,
+            text="💻 Localizar App",
+            width=110,
+            height=34,
+            fg_color=("#CBD5E1", "#334155"),
+            text_color=COLOR_TEXT_PRIMARY,
+            command=self.procurar_app_para_atalho,
+        )
+        btn_browse_app.pack(side="left", padx=4)
+
+        form_bot = ctk.CTkFrame(frame_adicionar, fg_color="transparent")
+        form_bot.pack(fill="x", padx=8, pady=(4, 4))
+
+        ctk.CTkLabel(form_bot, text="Ícone do Lado:", font=("Segoe UI", 10, "bold"), text_color=COLOR_TEXT_PRIMARY).pack(side="left", padx=4)
+
+        self.combo_icone = ctk.CTkComboBox(
+            form_bot,
+            values=["🎮", "💻", "🚀", "🌐", "🎵", "⚡", "📂", "🛠️"],
             width=80,
             height=32,
-            fg_color="#1DB954",
-            hover_color="#1AA34A",
-            command=self.carregar_embed_spotify
+            fg_color=COLOR_INPUT_BG,
+            text_color=COLOR_TEXT_PRIMARY,
+            dropdown_fg_color=COLOR_BG_CARD,
+            dropdown_text_color=COLOR_TEXT_PRIMARY
         )
-        btn_carregar_spot.pack(side="right", padx=8)
+        self.combo_icone.pack(side="left", padx=4)
+        self.combo_icone.set("🎮")
 
-        self.spotify_browser = HtmlFrame(self.tab_spotify)
-        self.spotify_browser.pack(fill="both", expand=True, pady=6)
-        
-        # Player Padrão do Spotify Embutido (Playlist Top Hits Brasil)
-        self.carregar_embed_spotify("https://open.spotify.com/playlist/37i9dQZF1DX0FO21A2R1ch")
+        self.btn_foto_atalho = ctk.CTkButton(
+            form_bot,
+            text="🖼️ Foto Custom",
+            width=110,
+            height=32,
+            fg_color=("#CBD5E1", "#334155"),
+            text_color=COLOR_TEXT_PRIMARY,
+            command=self.escolher_foto_icone_atalho,
+        )
+        self.btn_foto_atalho.pack(side="left", padx=4)
 
-    def carregar_embed_spotify(self, url_custom=None):
-        url = url_custom or self.entry_spotify_url.get().strip()
-        if not url:
+        btn_add_atalho = ctk.CTkButton(
+            form_bot,
+            text="+ Criar Atalho",
+            width=120,
+            height=32,
+            fg_color="#16A34A",
+            hover_color="#15803D",
+            text_color="#FFFFFF",
+            font=("Segoe UI", 11, "bold"),
+            command=self.adicionar_atalho_customizado,
+        )
+        btn_add_atalho.pack(side="right", padx=4)
+
+        # ATALHOS GERENCIÁVEIS
+        ctk.CTkLabel(
+            self.scroll_hub, text="⭐ Seus Atalhos Personalizados", font=("Segoe UI", 13, "bold"), text_color=COLOR_TEXT_PRIMARY
+        ).pack(anchor="w", pady=(4, 8))
+
+        self.grid_custom = ctk.CTkFrame(self.scroll_hub, fg_color="transparent")
+        self.grid_custom.pack(fill="x", pady=(0, 16))
+
+        # PADRÕES MÍDIA
+        ctk.CTkLabel(
+            self.scroll_hub, text="🎵 Mídia & Streaming (Padrão)", font=("Segoe UI", 13, "bold"), text_color=COLOR_TEXT_PRIMARY
+        ).pack(anchor="w", pady=(4, 8))
+
+        grid_media = ctk.CTkFrame(self.scroll_hub, fg_color="transparent")
+        grid_media.pack(fill="x", pady=(0, 16))
+
+        atalhos_padrao = [
+            ("🟢 Spotify", "https://open.spotify.com", "#1DB954"),
+            ("▶️ YouTube", "https://www.youtube.com", "#FF0000"),
+            ("🔴 Netflix", "https://www.netflix.com", "#E50914"),
+            ("💜 Twitch", "https://www.twitch.tv", "#9146FF"),
+            ("📦 Prime Video", "https://www.primevideo.com", "#00A8E1"),
+            ("💬 WhatsApp Web", "https://web.whatsapp.com", "#25D366"),
+        ]
+        self.criar_cards_grid(grid_media, atalhos_padrao)
+
+    def procurar_app_para_atalho(self):
+        caminho = filedialog.askopenfilename(
+            title="Selecione o Executável ou Atalho do Programa",
+            filetypes=[("Executáveis e Atalhos", "*.exe *.lnk *.bat *.cmd"), ("Todos os Arquivos", "*.*")]
+        )
+        if caminho:
+            self.entry_url_atalho.delete(0, "end")
+            self.entry_url_atalho.insert(0, caminho)
+            if not self.entry_nome_atalho.get():
+                nome_sugerido = os.path.splitext(os.path.basename(caminho))[0].capitalize()
+                self.entry_nome_atalho.insert(0, nome_sugerido)
+
+    def escolher_foto_icone_atalho(self):
+        caminho = filedialog.askopenfilename(
+            title="Escolha uma imagem para o ícone do atalho",
+            filetypes=[("Imagens", "*.png *.jpg *.jpeg *.ico *.bmp")]
+        )
+        if caminho:
+            self.icone_foto_temp = caminho
+            self.btn_foto_atalho.configure(text="✅ Foto OK")
+
+    def adicionar_atalho_customizado(self):
+        nome = self.entry_nome_atalho.get().strip()
+        alvo = self.entry_url_atalho.get().strip()
+        icone = self.combo_icone.get()
+
+        if not nome or not alvo:
             return
 
-        # Converte links padrão do Spotify para versão Embed compacta
-        embed_url = url.replace("open.spotify.com/", "open.spotify.com/embed/")
+        perfil = self.controller.perfil_ativo
+        if perfil:
+            novo_item = {
+                "nome": nome,
+                "alvo": alvo,
+                "icone": icone,
+                "foto_icone": self.icone_foto_temp
+            }
+            perfil["atalhos_custom"].append(novo_item)
+            AccountManager.salvar_dados(self.controller.dados_config)
+
+            self.entry_nome_atalho.delete(0, "end")
+            self.entry_url_atalho.delete(0, "end")
+            self.icone_foto_temp = ""
+            self.btn_foto_atalho.configure(text="🖼️ Foto Custom")
+            self.atualizar_atalhos_customizados()
+
+    def remover_atalho_customizado(self, index):
+        perfil = self.controller.perfil_ativo
+        if perfil and 0 <= index < len(perfil["atalhos_custom"]):
+            perfil["atalhos_custom"].pop(index)
+            AccountManager.salvar_dados(self.controller.dados_config)
+            self.atualizar_atalhos_customizados()
+
+    def mover_atalho_posicao(self, index, direcao):
+        perfil = self.controller.perfil_ativo
+        if not perfil:
+            return
         
-        html_code = f"""
-        <html>
-        <body style="background-color:#0F172A; margin:0; padding:10px; display:flex; justify-content:center; align-items:center;">
-            <iframe src="{embed_url}" width="100%" height="450" frameborder="0" allowtransparency="true" allow="encrypted-media"></iframe>
-        </body>
-        </html>
-        """
-        self.spotify_browser.load_html(html_code)
+        lista = perfil.get("atalhos_custom", [])
+        novo_index = index + direcao
 
-    def montar_aba_streaming(self):
-        grid_frame = ctk.CTkFrame(self.tab_streaming, fg_color="transparent")
-        grid_frame.pack(fill="both", expand=True, padx=16, pady=16)
+        if 0 <= novo_index < len(lista):
+            lista[index], lista[novo_index] = lista[novo_index], lista[index]
+            AccountManager.salvar_dados(self.controller.dados_config)
+            self.atualizar_atalhos_customizados()
 
-        servicos = [
-            ("🔴 Netflix", "https://www.netflix.com", "#E50914"),
-            ("▶️ YouTube", "https://m.youtube.com", "#FF0000"),
-            ("✨ Disney+", "https://www.disneyplus.com", "#113CCF"),
-            ("💜 Twitch", "https://m.twitch.tv", "#9146FF"),
-            ("📦 Prime Video", "https://www.primevideo.com", "#00A8E1"),
-            ("🟣 Max", "https://www.max.com", "#002BE7"),
-        ]
+    def atualizar_atalhos_customizados(self):
+        for widget in self.grid_custom.winfo_children():
+            widget.destroy()
 
-        col, row = 0, 0
-        for nome, url, cor in servicos:
-            btn = ctk.CTkButton(
-                grid_frame,
-                text=nome,
-                height=60,
-                corner_radius=10,
-                fg_color="#334155",
-                hover_color=cor,
-                text_color="#F8FAFC",
-                font=("Segoe UI", 12, "bold"),
-                command=lambda u=url: self.navegar_para(u),
+        perfil = self.controller.perfil_ativo
+        if not perfil:
+            return
+
+        lista = perfil.get("atalhos_custom", [])
+
+        if not lista:
+            lbl_vazio = ctk.CTkLabel(
+                self.grid_custom,
+                text="Nenhum atalho criado ainda. Adicione um no painel acima!",
+                text_color=COLOR_TEXT_SECONDARY
             )
-            btn.grid(row=row, column=col, padx=8, pady=8, sticky="nsew")
+            lbl_vazio.pack(anchor="w", padx=4, pady=4)
+            return
+
+        for idx, item in enumerate(lista):
+            card_frame = ctk.CTkFrame(
+                self.grid_custom,
+                fg_color=COLOR_BG_CARD,
+                border_color=COLOR_BORDER,
+                border_width=1,
+                corner_radius=8
+            )
+            card_frame.pack(fill="x", pady=4, padx=4)
+
+            foto_icon = item.get("foto_icone", "")
+            img_obj = None
+            if foto_icon and os.path.exists(foto_icon):
+                try:
+                    pil_img = Image.open(foto_icon)
+                    img_obj = ctk.CTkImage(light_image=pil_img, dark_image=pil_img, size=(20, 20))
+                except Exception:
+                    img_obj = None
+
+            prefixo_icone = item.get("icone", "🎮")
+            texto_exibicao = f"{prefixo_icone} {item['nome']}" if not img_obj else f" {item['nome']}"
+
+            btn_exec = ctk.CTkButton(
+                card_frame,
+                text=texto_exibicao,
+                image=img_obj,
+                compound="left",
+                height=42,
+                fg_color="transparent",
+                hover_color=("#CBD5E1", "#334155"),
+                text_color=COLOR_TEXT_PRIMARY,
+                font=("Segoe UI", 11, "bold"),
+                anchor="w",
+                command=lambda a=item['alvo']: self.abrir_inteligente(a),
+            )
+            btn_exec.pack(side="left", fill="both", expand=True, padx=(8, 0))
+
+            btn_up = ctk.CTkButton(
+                card_frame,
+                text="⬆️",
+                width=28,
+                height=28,
+                fg_color=("#CBD5E1", "#334155"),
+                text_color=COLOR_TEXT_PRIMARY,
+                command=lambda i=idx: self.mover_atalho_posicao(i, -1)
+            )
+            btn_up.pack(side="right", padx=2)
+
+            btn_down = ctk.CTkButton(
+                card_frame,
+                text="⬇️",
+                width=28,
+                height=28,
+                fg_color=("#CBD5E1", "#334155"),
+                text_color=COLOR_TEXT_PRIMARY,
+                command=lambda i=idx: self.mover_atalho_posicao(i, 1)
+            )
+            btn_down.pack(side="right", padx=2)
+
+            btn_del = ctk.CTkButton(
+                card_frame,
+                text="🗑️",
+                width=32,
+                height=28,
+                fg_color="#EF4444",
+                hover_color="#DC2626",
+                text_color="#FFFFFF",
+                command=lambda i=idx: self.remover_atalho_customizado(i),
+            )
+            btn_del.pack(side="right", padx=6)
+
+    def selecionar_executavel_direto(self):
+        caminho = filedialog.askopenfilename(
+            title="Escolha um Executável ou Arquivo",
+            filetypes=[("Executáveis", "*.exe *.lnk *.bat"), ("Todos os arquivos", "*.*")]
+        )
+        if caminho:
+            self.entry_universal.delete(0, "end")
+            self.entry_universal.insert(0, caminho)
+
+    def abrir_inteligente(self, alvo):
+        alvo_limpo = alvo.strip()
+
+        if os.path.exists(alvo_limpo):
+            try:
+                os.startfile(alvo_limpo)
+                return
+            except Exception:
+                try:
+                    subprocess.Popen([alvo_limpo], shell=True)
+                    return
+                except Exception as e:
+                    print(f"[ERRO] Erro ao abrir executável: {e}")
+
+        if alvo_limpo.startswith("http://") or alvo_limpo.startswith("https://"):
+            webbrowser.open(alvo_limpo)
+        elif "." in alvo_limpo and " " not in alvo_limpo:
+            webbrowser.open(f"https://{alvo_limpo}")
+        else:
+            try:
+                os.startfile(alvo_limpo)
+            except Exception:
+                query_encoded = urllib.parse.quote_plus(alvo_limpo)
+                webbrowser.open(f"https://www.google.com/search?q={query_encoded}")
+
+    def criar_cards_grid(self, frame_pai, lista_atalhos):
+        col, row = 0, 0
+        for nome, url, cor in lista_atalhos:
+            btn = ctk.CTkButton(
+                frame_pai,
+                text=nome,
+                height=52,
+                corner_radius=10,
+                fg_color=COLOR_BG_CARD,
+                hover_color=cor,
+                text_color=COLOR_TEXT_PRIMARY,
+                font=("Segoe UI", 12, "bold"),
+                command=lambda u=url: self.abrir_inteligente(u),
+            )
+            btn.grid(row=row, column=col, padx=6, pady=6, sticky="nsew")
 
             col += 1
             if col > 2:
@@ -506,13 +802,13 @@ class DashboardFrame(ctk.CTkFrame):
                 row += 1
 
         for i in range(3):
-            grid_frame.grid_columnconfigure(i, weight=1)
+            frame_pai.grid_columnconfigure(i, weight=1)
 
     def montar_aba_ai(self):
         self.chat_history = ctk.CTkTextbox(
             self.tab_ai,
-            fg_color="#334155",
-            text_color="#F8FAFC",
+            fg_color=COLOR_INPUT_BG,
+            text_color=COLOR_TEXT_PRIMARY,
             font=("Segoe UI", 11),
             corner_radius=8,
         )
@@ -525,9 +821,9 @@ class DashboardFrame(ctk.CTkFrame):
             input_frame,
             placeholder_text="Pergunte algo ao Gemini...",
             height=38,
-            fg_color="#334155",
-            text_color="#F8FAFC",
-            border_color="#334155",
+            fg_color=COLOR_INPUT_BG,
+            text_color=COLOR_TEXT_PRIMARY,
+            border_color=COLOR_BORDER,
         )
         self.entry_chat.pack(side="left", fill="x", expand=True, padx=(0, 6))
         self.entry_chat.bind("<Return>", lambda e: self.enviar_mensagem_ai())
@@ -537,6 +833,7 @@ class DashboardFrame(ctk.CTkFrame):
             text="Enviar",
             width=80,
             height=38,
+            text_color="#FFFFFF",
             command=self.enviar_mensagem_ai,
         )
         btn_enviar.pack(side="right")
@@ -548,17 +845,36 @@ class DashboardFrame(ctk.CTkFrame):
 
         ctk.CTkLabel(
             container,
+            text="Foto de Perfil & Conta",
+            font=("Segoe UI", 13, "bold"),
+            text_color=COLOR_TEXT_PRIMARY,
+        ).pack(anchor="w", pady=(0, 4))
+
+        btn_alterar_foto = ctk.CTkButton(
+            container,
+            text="🖼️ Alterar Foto de Perfil",
+            height=36,
+            fg_color=("#CBD5E1", "#334155"),
+            text_color=COLOR_TEXT_PRIMARY,
+            hover_color=("#94A3B8", "#475569"),
+            command=self.trocar_foto_perfil,
+        )
+        btn_alterar_foto.pack(anchor="w", pady=4)
+
+        ctk.CTkLabel(
+            container,
             text="Configurações da IA (Gemini)",
             font=("Segoe UI", 13, "bold"),
-            text_color="#F8FAFC",
-        ).pack(anchor="w", pady=(0, 4))
+            text_color=COLOR_TEXT_PRIMARY,
+        ).pack(anchor="w", pady=(16, 4))
 
         self.entry_api_key = ctk.CTkEntry(
             container,
             placeholder_text="Insira sua Chave de API do Gemini...",
             height=36,
-            fg_color="#334155",
-            border_color="#334155",
+            fg_color=COLOR_INPUT_BG,
+            text_color=COLOR_TEXT_PRIMARY,
+            border_color=COLOR_BORDER,
         )
         self.entry_api_key.pack(fill="x", pady=4)
 
@@ -566,6 +882,7 @@ class DashboardFrame(ctk.CTkFrame):
             container,
             text="Salvar Chave API",
             height=32,
+            text_color="#FFFFFF",
             command=self.salvar_chave_gemini,
         )
         btn_salvar_key.pack(anchor="e", pady=6)
@@ -573,20 +890,21 @@ class DashboardFrame(ctk.CTkFrame):
 
         ctk.CTkLabel(
             container,
-            text="Personalização de Cores",
+            text="Personalização de Cores Destaque",
             font=("Segoe UI", 13, "bold"),
-            text_color="#F8FAFC",
+            text_color=COLOR_TEXT_PRIMARY,
         ).pack(anchor="w", pady=(16, 4))
 
         frame_cores = ctk.CTkFrame(container, fg_color="transparent")
         frame_cores.pack(fill="x", pady=4)
 
-        for nome, dados in COLOR_THEMES.items():
+        for nome, dados in COLOR_ACCENTS.items():
             btn_c = ctk.CTkButton(
                 frame_cores,
                 text=nome.capitalize(),
                 fg_color=dados["primary"],
                 hover_color=dados["hover"],
+                text_color="#FFFFFF",
                 width=80,
                 height=32,
                 command=lambda c=nome: self.aplicar_cor_acento(c),
@@ -626,7 +944,6 @@ class DashboardFrame(ctk.CTkFrame):
             except Exception as e:
                 texto_resposta = f"Erro na requisição: {e}"
 
-            # Atualização segura na Thread principal
             self.after(0, lambda: self._atualizar_chat_resposta(texto_resposta))
 
         threading.Thread(target=processar, daemon=True).start()
@@ -635,29 +952,16 @@ class DashboardFrame(ctk.CTkFrame):
         self.chat_history.insert("end", f"Gemini: {texto}\n\n")
         self.chat_history.see("end")
 
-    def navegar_para(self, url):
-        self.tabview.set("🌐 Navegador")
-        self.browser.load_website(url)
-
     def executar_busca_universal(self):
         query = self.entry_universal.get().strip()
         if not query:
             return
 
-        self.tabview.set("🌐 Navegador")
-        if query.startswith("http://") or query.startswith("https://"):
-            url = query
-        elif "." in query and " " not in query:
-            url = f"https://{query}"
-        else:
-            query_encoded = urllib.parse.quote_plus(query)
-            url = f"https://html.duckduckgo.com/html/?q={query_encoded}"
-
-        self.browser.load_website(url)
+        self.abrir_inteligente(query)
 
 
 class OmniOverlay(ctk.CTk):
-    """Janela Principal que Gerencia os Frames de Navegação."""
+    """Aplicação Principal."""
 
     def __init__(self):
         super().__init__()
@@ -672,10 +976,39 @@ class OmniOverlay(ctk.CTk):
         self.gemini_client = None
         self.visivel = True
 
+        self.modo_tema_atual = self.dados_config.get("modo_tema", "dark")
+        ctk.set_appearance_mode(self.modo_tema_atual)
+
         self.frame_seletor = ProfileSelectorFrame(self, self)
         self.frame_dashboard = DashboardFrame(self, self)
 
         self.abrir_seletor_perfis()
+
+    def alternar_tema_global(self):
+        """Alterna o tema e redesenha a tela para aplicar a nova cor das letras."""
+        if self.modo_tema_atual == "dark":
+            self.modo_tema_atual = "light"
+        else:
+            self.modo_tema_atual = "dark"
+
+        ctk.set_appearance_mode(self.modo_tema_atual)
+
+        # Salva o tema escolhido
+        self.dados_config["modo_tema"] = self.modo_tema_atual
+        AccountManager.salvar_dados(self.dados_config)
+
+        # Recria os componentes da tela para forçar atualização das fontes e cores
+        perfil_temp = self.perfil_ativo
+        self.frame_dashboard.destroy()
+        self.frame_dashboard = DashboardFrame(self, self)
+
+        if perfil_temp:
+            self.frame_dashboard.pack(fill="both", expand=True)
+            self.frame_dashboard.carregar_perfil(perfil_temp)
+        else:
+            self.frame_seletor.destroy()
+            self.frame_seletor = ProfileSelectorFrame(self, self)
+            self.abrir_seletor_perfis()
 
     def centralizar_janela(self, largura, altura):
         self.geometry(f"{largura}x{altura}")

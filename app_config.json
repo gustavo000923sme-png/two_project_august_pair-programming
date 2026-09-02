@@ -4,21 +4,46 @@
             "id": "p1",
             "nome": "Jogador Principal",
             "cor_acento": "azul",
-            "gemini_key": ""
+            "gemini_key": "",
+            "atalhos_custom": [],
+            "foto_perfil": ""
         },
         {
             "id": "p_1788185983",
             "nome": "gustavo",
             "cor_acento": "azul",
-            "gemini_key": ""
+            "gemini_key": "Legal",
+            "atalhos_custom": [
+                {
+                    "nome": "Roblox",
+                    "alvo": "https://www.roblox.com/"
+                },
+                {
+                    "nome": "Visual studio code",
+                    "alvo": "C:/Users/Aluno/Desktop/desktop_dos_jovens/Visual Studio Code.lnk",
+                    "icone": "💻",
+                    "foto_icone": ""
+                }
+            ],
+            "foto_perfil": "C:/Users/Aluno/Downloads/ChatGPT Image 21_08_2026, 11_26_43.png"
         },
         {
             "id": "p_1788186646",
             "nome": "Maria",
             "cor_acento": "azul",
-            "gemini_key": ""
+            "gemini_key": "",
+            "atalhos_custom": [],
+            "foto_perfil": ""
+        },
+        {
+            "id": "p_1788350254",
+            "nome": "Yasmim",
+            "cor_acento": "azul",
+            "gemini_key": "",
+            "atalhos_custom": [],
+            "foto_perfil": ""
         }
     ],
-    "ultimo_perfil": "p_1788186646",
+    "ultimo_perfil": "p_1788185983",
     "modo_tema": "dark"
 }
