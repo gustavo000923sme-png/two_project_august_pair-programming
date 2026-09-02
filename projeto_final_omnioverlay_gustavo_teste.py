@@ -16,6 +16,7 @@ from tkinter import filedialog
 import customtkinter as ctk
 from PIL import Image
 from pynput import keyboard
+from tkvideoplayer import TkinterVideo
 
 CONFIG_FILE = "app_config.json"
 
@@ -227,7 +228,7 @@ class ProfileSelectorFrame(ctk.CTkFrame):
 
 
 class DashboardFrame(ctk.CTkFrame):
-    """Painel Principal Dashboard Overlay com Player de Vídeo."""
+    """Painel Principal Dashboard Overlay com Player de Vídeo Nativo."""
 
     def __init__(self, parent, controller):
         super().__init__(parent, fg_color=("#F1F5F9", "#0B0F17"), corner_radius=12)
@@ -635,7 +636,7 @@ class DashboardFrame(ctk.CTkFrame):
         perfil = self.controller.perfil_ativo
         if not perfil:
             return
-        
+
         lista = perfil.get("atalhos_custom", [])
         novo_index = index + direcao
 
@@ -793,13 +794,13 @@ class DashboardFrame(ctk.CTkFrame):
             frame_pai.grid_columnconfigure(i, weight=1)
 
     def montar_aba_player_video(self):
-        """Nova aba com Reprodutor de Mídia / Player de Vídeos."""
+        """Aba com Reprodutor de Mídia integrado diretamente na janela."""
         frame_top_video = ctk.CTkFrame(self.tab_video, fg_color="transparent")
         frame_top_video.pack(fill="x", padx=12, pady=10)
 
         self.entry_video_url = ctk.CTkEntry(
             frame_top_video,
-            placeholder_text="Cole o Link do Vídeo (YouTube, Twitch, MP4) ou selecione um arquivo...",
+            placeholder_text="Selecione um arquivo de vídeo (.mp4, .mkv, .avi)...",
             height=38,
             fg_color=COLOR_INPUT_BG,
             text_color=COLOR_TEXT_PRIMARY,
@@ -821,8 +822,8 @@ class DashboardFrame(ctk.CTkFrame):
 
         btn_play = ctk.CTkButton(
             frame_top_video,
-            text="▶️ Assistir Vídeo",
-            width=130,
+            text="▶️ Play",
+            width=80,
             height=38,
             fg_color="#16A34A",
             hover_color="#15803D",
@@ -830,9 +831,22 @@ class DashboardFrame(ctk.CTkFrame):
             font=("Segoe UI", 11, "bold"),
             command=self.reproduzir_video,
         )
-        btn_play.pack(side="right")
+        btn_play.pack(side="right", padx=(0, 4))
 
-        # Tela principal de exibição do Player
+        btn_pause = ctk.CTkButton(
+            frame_top_video,
+            text="⏸️ Pausar",
+            width=80,
+            height=38,
+            fg_color="#9333EA",
+            hover_color="#7E22CE",
+            text_color="#FFFFFF",
+            font=("Segoe UI", 11, "bold"),
+            command=self.pausar_video,
+        )
+        btn_pause.pack(side="right")
+
+        # Tela principal do Player integrado
         self.frame_screen = ctk.CTkFrame(
             self.tab_video,
             fg_color=("#1E293B", "#0F172A"),
@@ -842,37 +856,32 @@ class DashboardFrame(ctk.CTkFrame):
         )
         self.frame_screen.pack(fill="both", expand=True, padx=12, pady=(0, 10))
 
-        self.lbl_video_display = ctk.CTkLabel(
-            self.frame_screen,
-            text="📺 Player de Vídeo do Overlay\n\nCole o link de um vídeo do YouTube ou escolha um arquivo de vídeo do computador para reproduzir.",
-            font=("Segoe UI", 13),
-            text_color=("#94A3B8", "#64748B"),
-        )
-        self.lbl_video_display.pack(fill="both", expand=True, padx=20, pady=20)
+        # Instância do player de vídeo nativo dentro da janela do App
+        self.videoplayer = TkinterVideo(master=self.frame_screen, scaled=True)
+        self.videoplayer.pack(fill="both", expand=True, padx=10, pady=10)
 
     def selecionar_video_local(self):
         caminho = filedialog.askopenfilename(
             title="Escolha um arquivo de Vídeo",
-            filetypes=[("Vídeos", "*.mp4 *.mkv *.avi *.mov *.webm"), ("Todos os Arquivos", "*.*")]
+            filetypes=[("Vídeos", "*.mp4 *.avi *.mov *.mkv"), ("Todos os Arquivos", "*.*")]
         )
         if caminho:
             self.entry_video_url.delete(0, "end")
             self.entry_video_url.insert(0, caminho)
+            self.carregar_e_tocar_video(caminho)
+
+    def carregar_e_tocar_video(self, caminho):
+        if os.path.exists(caminho):
+            self.videoplayer.load(caminho)
+            self.videoplayer.play()
 
     def reproduzir_video(self):
-        url = self.entry_video_url.get().strip()
-        if not url:
-            return
+        caminho = self.entry_video_url.get().strip()
+        if os.path.exists(caminho):
+            self.videoplayer.play()
 
-        if os.path.exists(url):
-            try:
-                os.startfile(url)
-                self.lbl_video_display.configure(text=f"▶️ Reproduzindo arquivo local:\n{os.path.basename(url)}")
-            except Exception as e:
-                self.lbl_video_display.configure(text=f"Erro ao abrir vídeo local: {e}")
-        else:
-            webbrowser.open(url)
-            self.lbl_video_display.configure(text=f"🌐 Abrindo vídeo no navegador:\n{url}")
+    def pausar_video(self):
+        self.videoplayer.pause()
 
     def montar_aba_config(self):
         container = ctk.CTkScrollableFrame(self.tab_config, fg_color="transparent")
