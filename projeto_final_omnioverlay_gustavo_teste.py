@@ -16,7 +16,7 @@ from tkinter import filedialog
 import customtkinter as ctk
 from PIL import Image
 from pynput import keyboard
-from tkvideoplayer import TkinterVideo
+from tkVideoPlayer import TkinterVideo
 
 CONFIG_FILE = "app_config.json"
 
