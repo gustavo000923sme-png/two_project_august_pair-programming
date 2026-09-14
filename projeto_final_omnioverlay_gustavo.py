@@ -1,833 +1,561 @@
-"""
-===============================================================================
-PROJETO: OmniOverlay - Modern SaaS HUD (Família, IA & Streaming)
-===============================================================================
-"""
-
-import json
+import datetime
 import os
+import random
 import threading
+import time
 import customtkinter as ctk
-from PIL import Image, ImageDraw
+from PIL import Image
 from pynput import keyboard
-from tkinter import filedialog
+from tkVideoPlayer import TkinterVideo
 
-# Módulo para o Navegador Embutido
-from tkinterweb import HtmlFrame
+# Tenta importar o psutil sem quebrar o código caso ele não esteja instalado
+try:
+    import psutil
 
-from google import genai
+    HAS_PSUTIL = True
+except ImportError:
+    HAS_PSUTIL = False
 
-# Configurações globais do CustomTkinter
-ctk.set_appearance_mode("dark")
-
-COLOR_THEMES = {
-    "azul": {"primary": "#2563EB", "hover": "#1D4ED8"},
-    "vermelho": {"primary": "#DC2626", "hover": "#B91C1C"},
-    "verde": {"primary": "#16A34A", "hover": "#15803D"},
-    "roxo": {"primary": "#9333EA", "hover": "#7E22CE"},
-}
-
-CONFIG_FILE = "app_config.json"
+# --- CONFIGURAÇÕES VISUAIS DO CUSTOMTKINTER ---
+ctk.set_appearance_mode("Dark")
+ctk.set_default_color_theme("blue")
 
 
-class OmniOverlay(ctk.CTk):
+class MotorIALocalAvancado:
+    """Gerenciador local de IA/Comandos offline com sistema de respostas expansível."""
+
+    def __init__(self):
+        self.historico_interacoes = []
+        self.conhecimento = {
+            "ajuda": (
+                "📌 **Comandos e Recursos Disponíveis:**\n"
+                "- `status`: Diagnóstico do sistema e performance.\n"
+                "- `atalhos`: Como usar as teclas de atalho.\n"
+                "- `recursos`: Informações de CPU/RAM em uso.\n"
+                "- `notas`: Instruções do bloco de notas integrado.\n"
+                "- `limpar`: Reseta a janela de chat atual."
+            ),
+            "status": "🟢 **Sistema 100% Operacional!** Vídeo, overlay e escuta global ativos.",
+            "atalhos": "⌨️  Pressione **Alt + Z** para ocultar ou exibir a janela a qualquer momento.",
+            "recursos": "📊 Veja o consumo em tempo real na aba 'Sistema' no menu esquerdo.",
+            "notas": "📝 Use a aba 'Notas' para rascunhos rápidos. As anotações podem ser salvas localmente.",
+            "oi": "Olá! Como posso te auxiliar em sua área de trabalho hoje?",
+            "olá": "Olá! Como posso te auxiliar em sua área de trabalho hoje?",
+            "bom dia": "Bom dia! Pronto para começar o trabalho?",
+            "boa tarde": "Boa tarde! Como estão as tarefas por aí?",
+            "boa noite": "Boa noite! Precisando de um vídeo de apoio ou notas rápidas?",
+            "omnioverlay": "O OmniOverlay é uma suíte flutuante com player de vídeo, anotações e IA local.",
+        }
+
+    def processar_mensagem(self, mensagem: str) -> str:
+        texto = mensagem.lower().strip()
+        self.historico_interacoes.append(texto)
+
+        # Busca por palavras-chave registradas
+        for chave, resposta in self.conhecimento.items():
+            if chave in texto:
+                return resposta
+
+        # Lógica de fallback para entradas desconhecidas
+        respostas_fallback = [
+            (
+                "Estou operando em modo local. Não reconheci o comando. Digite"
+                " 'ajuda' para ver a lista."
+            ),
+            (
+                "Comando offline não mapeado. Experimente digitar 'status' ou"
+                " 'atalhos'."
+            ),
+            "Instrução não encontrada. Digite 'ajuda' para ver todas as opções.",
+        ]
+        return random.choice(respostas_fallback)
+
+
+class OmniOverlayApp(ctk.CTk):
 
     def __init__(self):
         super().__init__()
 
-        # Configurações da Janela
-        self.title("OmniOverlay Dashboard")
-        self.geometry("900x780")
-        self.minsize(800, 600)
-
+        # --- CONFIGURAÇÕES DA JANELA ---
+        self.title("OmniOverlay Dashboard & Assistant")
+        self.geometry("1000x620")
+        self.minsize(850, 500)
         self.attributes("-topmost", True)
-        self.overrideredirect(True)
-        self.attributes("-alpha", 0.98)
+        self.visible = True
 
-        # Estados e Variáveis
-        self._offset_x = 0
-        self._offset_y = 0
-        self.visivel = True
-        self.modo_cinema_ativo = False
-        self.client_gemini = None
+        self.ia = MotorIALocalAvancado()
+        self.video_duration = 0
+        self.updating_slider = False
 
-        self.modo_tema = "dark"
-        self.cor_acento = "azul"
-        self.accounts = {"google": True, "microsoft": False, "github": False}
-        self.api_keys = {"gemini": ""}
+        # --- ESTRUTURA DA INTERFACE (SIDEBAR + CONTEÚDO) ---
+        self.grid_columnconfigure(1, weight=1)
+        self.grid_rowconfigure(0, weight=1)
 
-        self.carregar_configuracoes()
+        self._criar_sidebar()
+        self._criar_container_principal()
 
-        # Dicionários de elementos atualizáveis
-        self.componentes_tema = []
-        self.dynamic_accent_buttons = []
-        self.btn_accounts = {}
+        # Iniciar abas
+        self._criar_aba_midia()
+        self._criar_aba_chat()
+        self._criar_aba_notas()
+        self._criar_aba_sistema()
 
-        # Ajusta paleta inicial
-        self.definir_paleta_cores(self.modo_tema)
+        # Selecionar aba inicial (Mídia)
+        self.selecionar_aba("midia")
 
-        # Construção da Interface
-        self.criar_interface()
-        self.iniciar_gemini()
-        self.aplicar_cor_acento(self.cor_acento)
+        # Iniciar Threads do Sistema
+        self.iniciar_atalho_global()
+        self.iniciar_monitoramento_sistema()
 
-    # -------------------------------------------------------------------------
-    # Sistema de Cores e Temas
-    # -------------------------------------------------------------------------
-    def definir_paleta_cores(self, modo):
-        self.modo_tema = modo
-        if modo == "dark":
-            self.bg_principal = "#0F172A"  # Slate 900
-            self.bg_card = "#1E293B"  # Slate 800
-            self.bg_input = "#334155"  # Slate 700
-            self.border_card = "#334155"
-            self.txt_principal = "#F8FAFC"  # Slate 50
-            self.txt_secundario = "#94A3B8"  # Slate 400
-        else:  # Modo Claro Corrigido (Alto Contraste)
-            self.bg_principal = "#F8FAFC"  # Slate 50
-            self.bg_card = "#FFFFFF"  # Branco puro
-            self.bg_input = "#F1F5F9"  # Slate 100
-            self.border_card = "#E2E8F0"  # Slate 200
-            self.txt_principal = "#0F172A"  # Slate 900 (Contraste forte)
-            self.txt_secundario = "#475569"  # Slate 600
+    # ==========================================
+    # CRIAÇÃO DE ELEMENTOS DA UI
+    # ==========================================
+    def _criar_sidebar(self):
+        self.sidebar_frame = ctk.CTkFrame(self, width=170, corner_radius=0)
+        self.sidebar_frame.grid(row=0, column=0, sticky="nsew")
+        self.sidebar_frame.grid_rowconfigure(5, weight=1)
 
-        self.configure(fg_color=self.bg_principal)
+        self.lbl_logo = ctk.CTkLabel(
+            self.sidebar_frame,
+            text="OMNI OVERLAY",
+            font=ctk.CTkFont(size=18, weight="bold"),
+        )
+        self.lbl_logo.grid(row=0, column=0, padx=15, pady=20)
 
-    def alternar_tema(self, novo_modo):
-        modo_str = "dark" if novo_modo.lower() in ["escuro", "dark"] else "light"
-        ctk.set_appearance_mode(modo_str)
-        self.definir_paleta_cores(modo_str)
+        self.btn_nav_midia = ctk.CTkButton(
+            self.sidebar_frame,
+            text="📺 Mídia & Player",
+            command=lambda: self.selecionar_aba("midia"),
+        )
+        self.btn_nav_midia.grid(row=1, column=0, padx=10, pady=5, sticky="ew")
 
-        # Atualiza a cor de fundo de todos os containers registrados
-        for comp in self.componentes_tema:
-            if hasattr(comp, "configure"):
-                comp.configure(
-                    fg_color=self.bg_card, border_color=self.border_card
+        self.btn_nav_chat = ctk.CTkButton(
+            self.sidebar_frame,
+            text="🤖 Assistente IA",
+            command=lambda: self.selecionar_aba("chat"),
+        )
+        self.btn_nav_chat.grid(row=2, column=0, padx=10, pady=5, sticky="ew")
+
+        self.btn_nav_notas = ctk.CTkButton(
+            self.sidebar_frame,
+            text="📝 Bloco de Notas",
+            command=lambda: self.selecionar_aba("notas"),
+        )
+        self.btn_nav_notas.grid(row=3, column=0, padx=10, pady=5, sticky="ew")
+
+        self.btn_nav_sistema = ctk.CTkButton(
+            self.sidebar_frame,
+            text="⚙️ Sistema",
+            command=lambda: self.selecionar_aba("sistema"),
+        )
+        self.btn_nav_sistema.grid(row=4, column=0, padx=10, pady=5, sticky="ew")
+
+        # Status rápido no rodapé da sidebar
+        self.lbl_status_topmost = ctk.CTkLabel(
+            self.sidebar_frame,
+            text="📌 Sempre no Topo: Ativo",
+            font=ctk.CTkFont(size=10),
+        )
+        self.lbl_status_topmost.grid(row=6, column=0, padx=10, pady=10)
+
+    def _criar_container_principal(self):
+        self.content_frame = ctk.CTkFrame(
+            self, corner_radius=10, fg_color="transparent"
+        )
+        self.content_frame.grid(
+            row=0, column=1, padx=15, pady=15, sticky="nsew"
+        )
+        self.content_frame.grid_rowconfigure(0, weight=1)
+        self.content_frame.grid_columnconfigure(0, weight=1)
+
+    def selecionar_aba(self, aba: str):
+        # Esconde todas as abas
+        self.frame_aba_midia.grid_forget()
+        self.frame_aba_chat.grid_forget()
+        self.frame_aba_notas.grid_forget()
+        self.frame_aba_sistema.grid_forget()
+
+        # Exibe a aba solicitada
+        if aba == "midia":
+            self.frame_aba_midia.grid(row=0, column=0, sticky="nsew")
+        elif aba == "chat":
+            self.frame_aba_chat.grid(row=0, column=0, sticky="nsew")
+        elif aba == "notas":
+            self.frame_aba_notas.grid(row=0, column=0, sticky="nsew")
+        elif aba == "sistema":
+            self.frame_aba_sistema.grid(row=0, column=0, sticky="nsew")
+
+    # ==========================================
+    # ABA 1: PLAYER DE VÍDEO
+    # ==========================================
+    def _criar_aba_midia(self):
+        self.frame_aba_midia = ctk.CTkFrame(
+            self.content_frame, corner_radius=10
+        )
+        self.frame_aba_midia.grid_rowconfigure(1, weight=1)
+        self.frame_aba_midia.grid_columnconfigure(0, weight=1)
+
+        # Cabeçalho
+        lbl_head = ctk.CTkLabel(
+            self.frame_aba_midia,
+            text="Central de Mídia Flutuante",
+            font=ctk.CTkFont(size=16, weight="bold"),
+        )
+        lbl_head.grid(row=0, column=0, pady=10)
+
+        # Player
+        self.video_player = TkinterVideo(
+            master=self.frame_aba_midia, scaled=True
+        )
+        self.video_player.grid(
+            row=1, column=0, padx=10, pady=5, sticky="nsew"
+        )
+
+        # Eventos do Player
+        self.video_player.bind(
+            "<<Duration>>", self._on_video_duration_found
+        )
+        self.video_player.bind("<<SecondChanged>>", self._on_second_changed)
+        self.video_player.bind("<<Ended>>", self._on_video_ended)
+
+        # Controles (Corrigido o sticky="ew" no lugar de fill="x")
+        frame_controls = ctk.CTkFrame(
+            self.frame_aba_midia, fg_color="transparent"
+        )
+        frame_controls.grid(row=2, column=0, sticky="ew", padx=10, pady=10)
+
+        # Linha 1 dos Controles: Slider + Tempo
+        frame_slider = ctk.CTkFrame(frame_controls, fg_color="transparent")
+        frame_slider.pack(fill="x", pady=2)
+
+        self.lbl_tempo_atual = ctk.CTkLabel(
+            frame_slider, text="00:00", font=ctk.CTkFont(size=11)
+        )
+        self.lbl_tempo_atual.pack(side="left", padx=5)
+
+        self.slider_progresso = ctk.CTkSlider(
+            frame_slider,
+            from_=0,
+            to=100,
+            command=self._on_seek_slider,
+        )
+        self.slider_progresso.set(0)
+        self.slider_progresso.pack(side="left", fill="x", expand=True, padx=5)
+
+        self.lbl_tempo_total = ctk.CTkLabel(
+            frame_slider, text="00:00", font=ctk.CTkFont(size=11)
+        )
+        self.lbl_tempo_total.pack(side="right", padx=5)
+
+        # Linha 2 dos Controles: Botões
+        frame_botoes = ctk.CTkFrame(frame_controls, fg_color="transparent")
+        frame_botoes.pack(fill="x", pady=5)
+
+        btn_load = ctk.CTkButton(
+            frame_botoes,
+            text="📁 Abrir Arquivo",
+            command=self.carregar_video,
+            width=110,
+        )
+        btn_load.pack(side="left", padx=5)
+
+        btn_rewind = ctk.CTkButton(
+            frame_botoes,
+            text="⏪ -5s",
+            command=lambda: self.avancar_recuar(-5),
+            width=65,
+        )
+        btn_rewind.pack(side="left", padx=2)
+
+        self.btn_play_pause = ctk.CTkButton(
+            frame_botoes,
+            text="▶ Play",
+            command=self.toggle_video,
+            width=90,
+        )
+        self.btn_play_pause.pack(side="left", padx=2)
+
+        btn_forward = ctk.CTkButton(
+            frame_botoes,
+            text="⏩ +5s",
+            command=lambda: self.avancar_recuar(5),
+            width=65,
+        )
+        btn_forward.pack(side="left", padx=2)
+
+    def carregar_video(self):
+        file_path = ctk.filedialog.askopenfilename(
+            filetypes=[
+                (
+                    "Arquivos de Vídeo",
+                    "*.mp4 *.mkv *.avi *.mov *.flv *.wmv",
+                )
+            ]
+        )
+        if file_path:
+            self.video_player.load(file_path)
+            self.video_player.play()
+            self.btn_play_pause.configure(text="⏸ Pause")
+
+    def toggle_video(self):
+        if self.video_player.is_paused():
+            self.video_player.play()
+            self.btn_play_pause.configure(text="⏸ Pause")
+        else:
+            self.video_player.pause()
+            self.btn_play_pause.configure(text="▶ Play")
+
+    def avancar_recuar(self, segundos):
+        if self.video_duration > 0:
+            pos_atual = self.slider_progresso.get()
+            nova_pos = max(0, min(self.video_duration, pos_atual + segundos))
+            self.video_player.seek(int(nova_pos))
+
+    def _on_video_duration_found(self, event):
+        info = self.video_player.video_info()
+        self.video_duration = info.get("duration", 0)
+        self.slider_progresso.configure(to=self.video_duration)
+        self.lbl_tempo_total.configure(
+            text=str(datetime.timedelta(seconds=int(self.video_duration)))
+        )
+
+    def _on_second_changed(self, event):
+        if not self.updating_slider and self.video_duration > 0:
+            pos = self.slider_progresso.get() + 1
+            if pos <= self.video_duration:
+                self.slider_progresso.set(pos)
+                self.lbl_tempo_atual.configure(
+                    text=str(datetime.timedelta(seconds=int(pos)))
                 )
 
-        # Atualiza labels e entradas textuais
-        self.lbl_titulo.configure(text_color=self.txt_principal)
-        self.entry_universal.configure(
-            fg_color=self.bg_input,
-            text_color=self.txt_principal,
-            border_color=self.border_card,
+    def _on_seek_slider(self, value):
+        self.updating_slider = True
+        self.video_player.seek(int(value))
+        self.lbl_tempo_atual.configure(
+            text=str(datetime.timedelta(seconds=int(value)))
         )
-        self.txt_resposta_ia.configure(
-            fg_color=self.bg_input, text_color=self.txt_principal
+        self.updating_slider = False
+
+    def _on_video_ended(self, event):
+        self.btn_play_pause.configure(text="▶ Play")
+        self.slider_progresso.set(0)
+        self.lbl_tempo_atual.configure(text="00:00")
+
+    # ==========================================
+    # ABA 2: CHAT ASSISTENTE LOCAL
+    # ==========================================
+    def _criar_aba_chat(self):
+        self.frame_aba_chat = ctk.CTkFrame(self.content_frame, corner_radius=10)
+        self.frame_aba_chat.grid_rowconfigure(1, weight=1)
+        self.frame_aba_chat.grid_columnconfigure(0, weight=1)
+
+        lbl_head = ctk.CTkLabel(
+            self.frame_aba_chat,
+            text="Assistente Local Omni (Sem API)",
+            font=ctk.CTkFont(size=16, weight="bold"),
         )
+        lbl_head.grid(row=0, column=0, pady=10)
 
-        self.salvar_configuracoes()
+        self.txt_chat = ctk.CTkTextbox(self.frame_aba_chat, state="disabled")
+        self.txt_chat.grid(row=1, column=0, padx=10, pady=5, sticky="nsew")
 
-    def aplicar_cor_acento(self, nome_cor):
-        self.cor_acento = nome_cor
-        cor = COLOR_THEMES.get(nome_cor, COLOR_THEMES["azul"])
+        frame_in = ctk.CTkFrame(self.frame_aba_chat, fg_color="transparent")
+        frame_in.grid(row=2, column=0, sticky="ew", padx=10, pady=10)
 
-        for btn in self.dynamic_accent_buttons:
-            btn.configure(fg_color=cor["primary"], hover_color=cor["hover"])
-
-        for chave in self.accounts:
-            self.atualizar_botao_conta(chave)
-
-        self.salvar_configuracoes()
-
-    # -------------------------------------------------------------------------
-    # Movimentação do HUD
-    # -------------------------------------------------------------------------
-    def iniciar_arraste(self, event):
-        self._offset_x = event.x
-        self._offset_y = event.y
-
-    def arrastar_janela(self, event):
-        if not self.modo_cinema_ativo:
-            x = self.winfo_x() + (event.x - self._offset_x)
-            y = self.winfo_y() + (event.y - self._offset_y)
-            self.geometry(f"+{x}+{y}")
-
-    # -------------------------------------------------------------------------
-    # Interface Gráfica Principal
-    # -------------------------------------------------------------------------
-    def criar_interface(self):
-        # 1. BARRA SUPERIOR (HEADER)
-        self.header_frame = ctk.CTkFrame(
-            self,
-            fg_color=self.bg_card,
-            corner_radius=12,
-            border_color=self.border_card,
-            border_width=1,
-            height=60,
+        self.entry_chat = ctk.CTkEntry(
+            frame_in, placeholder_text="Digite 'ajuda' para comandos..."
         )
-        self.header_frame.pack(fill="x", padx=16, pady=(16, 8))
-        self.componentes_tema.append(self.header_frame)
+        self.entry_chat.pack(side="left", fill="x", expand=True, padx=5)
+        self.entry_chat.bind("<Return>", lambda e: self.enviar_msg_chat())
 
-        self.header_frame.bind("<Button-1>", self.iniciar_arraste)
-        self.header_frame.bind("<B1-Motion>", self.arrastar_janela)
+        btn_send = ctk.CTkButton(
+            frame_in, text="Enviar", width=80, command=self.enviar_msg_chat
+        )
+        btn_send.pack(side="right", padx=5)
 
-        # Avatar
-        self.lbl_avatar = ctk.CTkLabel(
-            self.header_frame,
-            text="😊",
-            width=42,
-            height=42,
-            corner_radius=21,
-            fg_color="#3B82F6",
-            text_color="#FFFFFF",
-            font=("Segoe UI", 18),
-        )
-        self.lbl_avatar.pack(side="left", padx=(12, 10))
-
-        self.lbl_titulo = ctk.CTkLabel(
-            self.header_frame,
-            text="OmniOverlay",
-            font=("Segoe UI", 16, "bold"),
-            text_color=self.txt_principal,
-        )
-        self.lbl_titulo.pack(side="left", padx=2)
-
-        # Botão Fechar HUD
-        btn_fechar = ctk.CTkButton(
-            self.header_frame,
-            text="✕",
-            width=36,
-            height=36,
-            corner_radius=8,
-            fg_color="#EF4444",
-            hover_color="#DC2626",
-            font=("Segoe UI", 14, "bold"),
-            command=self.destroy,
-        )
-        btn_fechar.pack(side="right", padx=12)
-
-        # Botão Modo Cinema
-        self.btn_modo_cinema = ctk.CTkButton(
-            self.header_frame,
-            text="🍿 Modo Cinema",
-            height=36,
-            corner_radius=8,
-            fg_color="#E50914",
-            hover_color="#B20710",
-            text_color="#FFFFFF",
-            font=("Segoe UI", 11, "bold"),
-            command=self.alternar_modo_cinema,
-        )
-        self.btn_modo_cinema.pack(side="right", padx=6)
-
-        # 2. BARRA DE PESQUISA UNIVERSAL FIXA
-        self.frame_busca = ctk.CTkFrame(
-            self,
-            fg_color=self.bg_card,
-            corner_radius=12,
-            border_color=self.border_card,
-            border_width=1,
-        )
-        self.frame_busca.pack(fill="x", padx=16, pady=4)
-        self.componentes_tema.append(self.frame_busca)
-
-        self.seletor_modo = ctk.CTkOptionMenu(
-            self.frame_busca,
-            values=["🌐 Pesquisar na Web", "🤖 Perguntar para a IA"],
-            width=170,
-            height=38,
-            corner_radius=8,
-            fg_color=self.bg_input,
-            button_color="#475569",
-            font=("Segoe UI", 11, "bold"),
-        )
-        self.seletor_modo.pack(side="left", padx=8, pady=8)
-
-        self.entry_universal = ctk.CTkEntry(
-            self.frame_busca,
-            placeholder_text="Digite um endereço web ou pergunta...",
-            height=38,
-            corner_radius=8,
-            fg_color=self.bg_input,
-            text_color=self.txt_principal,
-            border_color=self.border_card,
-            font=("Segoe UI", 11),
-        )
-        self.entry_universal.pack(
-            side="left", fill="x", expand=True, padx=4, pady=8
-        )
-        self.entry_universal.bind(
-            "<Return>", lambda e: self.executar_busca_universal()
+        self.adicionar_log_chat(
+            "Sistema",
+            "Assistente offline inicializado. Digite 'ajuda' para ver comandos.",
         )
 
-        btn_executar = ctk.CTkButton(
-            self.frame_busca,
-            text="Buscar 🔍",
-            width=100,
-            height=38,
-            corner_radius=8,
-            font=("Segoe UI", 11, "bold"),
-            command=self.executar_busca_universal,
+    def enviar_msg_chat(self):
+        txt = self.entry_chat.get().strip()
+        if not txt:
+            return
+
+        self.entry_chat.delete(0, "end")
+        self.adicionar_log_chat("Você", txt)
+
+        if txt.lower() == "limpar":
+            self.txt_chat.configure(state="normal")
+            self.txt_chat.delete("1.0", "end")
+            self.txt_chat.configure(state="disabled")
+            self.adicionar_log_chat("Sistema", "Chat resetado com sucesso.")
+            return
+
+        resp = self.ia.processar_mensagem(txt)
+        self.adicionar_log_chat("OmniBot", resp)
+
+    def adicionar_log_chat(self, autor, msg):
+        self.txt_chat.configure(state="normal")
+        self.txt_chat.insert("end", f"[{autor}]: {msg}\n\n")
+        self.txt_chat.see("end")
+        self.txt_chat.configure(state="disabled")
+
+    # ==========================================
+    # ABA 3: BLOCO DE NOTAS RÁPIDAS
+    # ==========================================
+    def _criar_aba_notas(self):
+        self.frame_aba_notas = ctk.CTkFrame(
+            self.content_frame, corner_radius=10
         )
-        btn_executar.pack(side="right", padx=8, pady=8)
-        self.dynamic_accent_buttons.append(btn_executar)
+        self.frame_aba_notas.grid_rowconfigure(1, weight=1)
+        self.frame_aba_notas.grid_columnconfigure(0, weight=1)
 
-        # Resposta da IA (Oculta por padrão)
-        self.frame_ia_resposta = ctk.CTkFrame(
-            self,
-            fg_color=self.bg_card,
-            corner_radius=12,
-            border_color="#38BDF8",
-            border_width=1,
+        lbl_head = ctk.CTkLabel(
+            self.frame_aba_notas,
+            text="Bloco de Anotações Rápidas",
+            font=ctk.CTkFont(size=16, weight="bold"),
         )
-        self.componentes_tema.append(self.frame_ia_resposta)
+        lbl_head.grid(row=0, column=0, pady=10)
 
-        lbl_ia_head = ctk.CTkLabel(
-            self.frame_ia_resposta,
-            text="🤖 RESPOSTA DA IA",
-            font=("Segoe UI", 11, "bold"),
-            text_color="#38BDF8",
+        self.txt_notas = ctk.CTkTextbox(
+            self.frame_aba_notas, font=ctk.CTkFont(size=13)
         )
-        lbl_ia_head.pack(anchor="w", padx=12, pady=(6, 2))
+        self.txt_notas.grid(row=1, column=0, padx=10, pady=5, sticky="nsew")
 
-        btn_fechar_ia = ctk.CTkButton(
-            self.frame_ia_resposta,
-            text="✕",
-            width=24,
-            height=24,
-            corner_radius=6,
-            fg_color="#EF4444",
-            hover_color="#DC2626",
-            command=self.ocultar_painel_ia,
-        )
-        btn_fechar_ia.place(relx=0.96, rely=0.05)
-
-        self.txt_resposta_ia = ctk.CTkTextbox(
-            self.frame_ia_resposta,
-            height=100,
-            corner_radius=8,
-            fg_color=self.bg_input,
-            text_color=self.txt_principal,
-            font=("Segoe UI", 11),
-        )
-        self.txt_resposta_ia.pack(fill="x", padx=12, pady=(2, 8))
-
-        # 3. NAVEGAÇÃO POR ABAS (HUB MODERNO)
-        self.tabview = ctk.CTkTabview(
-            self,
-            corner_radius=12,
-            fg_color=self.bg_card,
-            border_color=self.border_card,
-            border_width=1,
-        )
-        self.tabview.pack(
-            fill="both", expand=True, padx=16, pady=(8, 16)
-        )
-        self.componentes_tema.append(self.tabview)
-
-        # Criando as abas
-        self.tab_web = self.tabview.add("🌐 Navegador")
-        self.tab_streaming = self.tabview.add("🎬 Streaming")
-        self.tab_midia = self.tabview.add("🎵 Tocador")
-        self.tab_config = self.tabview.add("⚙️ Opções & Contas")
-
-        # Configurar conteúdo de cada aba
-        self.montar_aba_navegador()
-        self.montar_aba_streaming()
-        self.montar_aba_midia()
-        self.montar_aba_configuracoes()
-
-    # -------------------------------------------------------------------------
-    # Conteúdo das Abas
-    # -------------------------------------------------------------------------
-    def montar_aba_navegador(self):
-        self.browser = HtmlFrame(self.tab_web)
-        self.browser.pack(fill="both", expand=True)
-        self.browser.load_website("https://www.google.com/safeSearch")
-
-    def montar_aba_streaming(self):
-        lbl = ctk.CTkLabel(
-            self.tab_streaming,
-            text="Plataformas de Streaming",
-            font=("Segoe UI", 14, "bold"),
-            text_color=self.txt_principal,
-        )
-        lbl.pack(anchor="w", padx=16, pady=(12, 16))
-
-        grid_frame = ctk.CTkFrame(self.tab_streaming, fg_color="transparent")
-        grid_frame.pack(fill="both", expand=True, padx=16)
-
-        servicos = [
-            ("🔴 Netflix", "https://www.netflix.com", "#E50914"),
-            ("▶️ YouTube", "https://www.youtube.com", "#FF0000"),
-            ("✨ Disney+", "https://www.disneyplus.com", "#113CCF"),
-            ("💜 Twitch", "https://www.twitch.tv", "#9146FF"),
-            ("📦 Prime Video", "https://www.primevideo.com", "#00A8E1"),
-            ("🟣 Max", "https://www.max.com", "#002BE7"),
-        ]
-
-        # Botões organizados em Grade (Grid)
-        col, row = 0, 0
-        for nome, url, cor in servicos:
-            btn = ctk.CTkButton(
-                grid_frame,
-                text=nome,
-                height=50,
-                corner_radius=10,
-                fg_color=self.bg_input,
-                hover_color=cor,
-                text_color=self.txt_principal,
-                font=("Segoe UI", 12, "bold"),
-                command=lambda u=url: self.abrir_streaming_e_navegar(u),
-            )
-            btn.grid(
-                row=row, column=col, padx=8, pady=8, sticky="nsew"
-            )
-
-            col += 1
-            if col > 2:
-                col = 0
-                row += 1
-
-        for i in range(3):
-            grid_frame.grid_columnconfigure(i, weight=1)
-
-    def montar_aba_midia(self):
-        frame_player = ctk.CTkFrame(
-            self.tab_midia, fg_color=self.bg_input, corner_radius=12
-        )
-        frame_player.pack(fill="x", padx=16, pady=20)
-
-        self.lbl_musica_titulo = ctk.CTkLabel(
-            frame_player,
-            text="Tocador de Mídia",
-            font=("Segoe UI", 14, "bold"),
-            text_color=self.txt_principal,
-        )
-        self.lbl_musica_titulo.pack(pady=(16, 2))
-
-        self.lbl_artista = ctk.CTkLabel(
-            frame_player,
-            text="Nenhuma faixa em execução",
-            font=("Segoe UI", 11),
-            text_color=self.txt_secundario,
-        )
-        self.lbl_artista.pack(pady=(0, 12))
-
-        self.slider_progresso = ctk.CTkProgressBar(
-            frame_player,
-            height=6,
-            progress_color="#22C55E",
-            fg_color="#475569",
-            corner_radius=3,
-        )
-        self.slider_progresso.pack(fill="x", padx=30, pady=8)
-        self.slider_progresso.set(0.0)
-
-        frame_ctrl = ctk.CTkFrame(frame_player, fg_color="transparent")
-        frame_ctrl.pack(pady=16)
-
-        ctk.CTkButton(
-            frame_ctrl,
-            text="⏮",
-            width=50,
-            height=40,
-            corner_radius=20,
-            fg_color="#475569",
-            command=lambda: self.lbl_musica_titulo.configure(
-                text="Faixa Anterior"
-            ),
-        ).pack(side="left", padx=6)
-        ctk.CTkButton(
-            frame_ctrl,
-            text="⏯",
-            width=60,
-            height=40,
-            corner_radius=20,
-            fg_color="#22C55E",
-            hover_color="#16A34A",
-            font=("Segoe UI", 14, "bold"),
-            command=lambda: self.lbl_musica_titulo.configure(
-                text="Tocando / Pausado"
-            ),
-        ).pack(side="left", padx=6)
-        ctk.CTkButton(
-            frame_ctrl,
-            text="⏭",
-            width=50,
-            height=40,
-            corner_radius=20,
-            fg_color="#475569",
-            command=lambda: self.lbl_musica_titulo.configure(
-                text="Próxima Faixa"
-            ),
-        ).pack(side="left", padx=6)
-
-    def montar_aba_configuracoes(self):
-        container = ctk.CTkScrollableFrame(
-            self.tab_config, fg_color="transparent"
-        )
-        container.pack(fill="both", expand=True, padx=8, pady=8)
-
-        # CARD 1: PERFIL
-        card_perfil = ctk.CTkFrame(
-            container, fg_color=self.bg_input, corner_radius=10
-        )
-        card_perfil.pack(fill="x", pady=6, ipady=6)
-
-        ctk.CTkLabel(
-            card_perfil,
-            text="Perfil do Usuário",
-            font=("Segoe UI", 12, "bold"),
-            text_color=self.txt_principal,
-        ).pack(anchor="w", padx=12, pady=(6, 2))
-
-        btn_foto = ctk.CTkButton(
-            card_perfil,
-            text="Alterar Foto de Perfil",
-            height=34,
-            font=("Segoe UI", 10, "bold"),
-            command=self.selecionar_foto_perfil,
-        )
-        btn_foto.pack(anchor="w", padx=12, pady=4)
-        self.dynamic_accent_buttons.append(btn_foto)
-
-        self.entry_nome_usuario = ctk.CTkEntry(
-            card_perfil,
-            placeholder_text="Nome do Usuário",
-            height=34,
-            font=("Segoe UI", 10),
-        )
-        self.entry_nome_usuario.pack(fill="x", padx=12, pady=4)
-
-        # CARD 2: APARÊNCIA & CORES
-        card_visual = ctk.CTkFrame(
-            container, fg_color=self.bg_input, corner_radius=10
-        )
-        card_visual.pack(fill="x", pady=6, ipady=6)
-
-        ctk.CTkLabel(
-            card_visual,
-            text="Aparência e Cores",
-            font=("Segoe UI", 12, "bold"),
-            text_color=self.txt_principal,
-        ).pack(anchor="w", padx=12, pady=(6, 2))
-
-        self.switch_tema = ctk.CTkOptionMenu(
-            card_visual,
-            values=["Escuro", "Claro"],
-            height=32,
-            font=("Segoe UI", 10),
-            command=self.alternar_tema,
-        )
-        self.switch_tema.pack(anchor="w", padx=12, pady=4)
-        if self.modo_tema == "light":
-            self.switch_tema.set("Claro")
-
-        ctk.CTkLabel(
-            card_visual,
-            text="Cor de Acento do App:",
-            font=("Segoe UI", 10),
-            text_color=self.txt_secundario,
-        ).pack(anchor="w", padx=12, pady=(4, 0))
-
-        frame_cores = ctk.CTkFrame(card_visual, fg_color="transparent")
-        frame_cores.pack(anchor="w", padx=12, pady=4)
-
-        for nome_c, chave_c in [
-            ("Azul", "azul"),
-            ("Vermelho", "vermelho"),
-            ("Verde", "verde"),
-            ("Roxo", "roxo"),
-        ]:
-            ctk.CTkButton(
-                frame_cores,
-                text=nome_c,
-                width=75,
-                height=30,
-                corner_radius=6,
-                fg_color=COLOR_THEMES[chave_c]["primary"],
-                hover_color=COLOR_THEMES[chave_c]["hover"],
-                font=("Segoe UI", 10, "bold"),
-                command=lambda k=chave_c: self.aplicar_cor_acento(k),
-            ).pack(side="left", padx=2)
-
-        # CARD 3: CONTAS & CHAVE IA
-        card_contas = ctk.CTkFrame(
-            container, fg_color=self.bg_input, corner_radius=10
-        )
-        card_contas.pack(fill="x", pady=6, ipady=6)
-
-        ctk.CTkLabel(
-            card_contas,
-            text="Contas & Chave IA",
-            font=("Segoe UI", 12, "bold"),
-            text_color=self.txt_principal,
-        ).pack(anchor="w", padx=12, pady=(6, 2))
-
-        for chave, nome in [
-            ("google", "Google"),
-            ("microsoft", "Microsoft"),
-            ("github", "GitHub"),
-        ]:
-            row_c = ctk.CTkFrame(card_contas, fg_color="transparent")
-            row_c.pack(fill="x", padx=12, pady=2)
-            ctk.CTkLabel(
-                row_c,
-                text=nome,
-                font=("Segoe UI", 10),
-                text_color=self.txt_principal,
-            ).pack(side="left")
-
-            btn_acc = ctk.CTkButton(
-                row_c,
-                text="",
-                width=100,
-                height=28,
-                font=("Segoe UI", 9, "bold"),
-                command=lambda k=chave: self.toggle_conta(k),
-            )
-            btn_acc.pack(side="right")
-            self.btn_accounts[chave] = btn_acc
-
-        self.entry_gemini_key = ctk.CTkEntry(
-            card_contas,
-            placeholder_text="Chave de API do Gemini",
-            height=34,
-            show="*",
-            font=("Segoe UI", 10),
-        )
-        self.entry_gemini_key.pack(fill="x", padx=12, pady=(8, 4))
-        self.entry_gemini_key.insert(
-            0, self.api_keys.get("gemini", os.environ.get("GEMINI_API_KEY", ""))
-        )
+        frame_btn = ctk.CTkFrame(self.frame_aba_notas, fg_color="transparent")
+        frame_btn.grid(row=2, column=0, sticky="ew", padx=10, pady=10)
 
         btn_salvar = ctk.CTkButton(
-            card_contas,
-            text="Salvar Alterações",
-            height=36,
-            font=("Segoe UI", 10, "bold"),
-            command=self.salvar_contas,
+            frame_btn, text="💾 Salvar Nota", command=self.salvar_nota
         )
-        btn_salvar.pack(fill="x", padx=12, pady=8)
-        self.dynamic_accent_buttons.append(btn_salvar)
+        btn_salvar.pack(side="left", padx=5)
 
-    # -------------------------------------------------------------------------
-    # Operações de Negócio
-    # -------------------------------------------------------------------------
-    def abrir_streaming_e_navegar(self, url):
-        self.tabview.set("🌐 Navegador")
-        self.browser.load_website(url)
+        btn_limpar = ctk.CTkButton(
+            frame_btn, text="🗑️ Limpar Texto", command=self.limpar_nota
+        )
+        btn_limpar.pack(side="left", padx=5)
 
-    def alternar_modo_cinema(self):
-        if not self.modo_cinema_ativo:
-            self.modo_cinema_ativo = True
-            self.frame_busca.pack_forget()
-            self.btn_modo_cinema.configure(text="🔙 Sair do Cinema")
-            self.tabview.set("🌐 Navegador")
-            self.geometry("1024x768")
-        else:
-            self.modo_cinema_ativo = False
-            self.frame_busca.pack(
-                fill="x", padx=16, pady=4, after=self.header_frame
+    def salvar_nota(self):
+        conteudo = self.txt_notas.get("1.0", "end-1c")
+        if conteudo.strip():
+            filepath = ctk.filedialog.asksaveasfilename(
+                defaultextension=".txt",
+                filetypes=[("Texto", "*.txt"), ("Todos os arquivos", "*.*")],
             )
-            self.btn_modo_cinema.configure(text="🍿 Modo Cinema")
-            self.geometry("900x780")
+            if filepath:
+                with open(filepath, "w", encoding="utf-8") as f:
+                    f.write(conteudo)
 
-    def executar_busca_universal(self):
-        query = self.entry_universal.get().strip()
-        if not query:
-            return
+    def limpar_nota(self):
+        self.txt_notas.delete("1.0", "end")
 
-        modo = self.seletor_modo.get()
-
-        if "Web" in modo:
-            self.tabview.set("🌐 Navegador")
-            if query.startswith("http://") or query.startswith("https://"):
-                url = query
-            elif "." in query and " " not in query:
-                url = f"https://{query}"
-            else:
-                url = f"https://www.google.com/search?q={query}&safe=active"
-
-            self.browser.load_website(url)
-
-        elif "IA" in modo:
-            self.exibir_painel_ia(query)
-
-    def exibir_painel_ia(self, pergunta):
-        self.frame_ia_resposta.pack(
-            fill="x", padx=16, pady=4, after=self.frame_busca
+    # ==========================================
+    # ABA 4: DIAGNÓSTICO DO SISTEMA
+    # ==========================================
+    def _criar_aba_sistema(self):
+        self.frame_aba_sistema = ctk.CTkFrame(
+            self.content_frame, corner_radius=10
         )
-        self.txt_resposta_ia.delete("1.0", "end")
-        self.txt_resposta_ia.insert(
-            "1.0", "🤖 Processando sua pergunta..."
+        self.frame_aba_sistema.grid_columnconfigure(0, weight=1)
+
+        lbl_head = ctk.CTkLabel(
+            self.frame_aba_sistema,
+            text="Monitoramento do Sistema & Configurações",
+            font=ctk.CTkFont(size=16, weight="bold"),
+        )
+        lbl_head.grid(row=0, column=0, pady=15)
+
+        # Medidor de CPU
+        self.lbl_cpu = ctk.CTkLabel(
+            self.frame_aba_sistema, text="CPU: 0%", font=ctk.CTkFont(size=14)
+        )
+        self.lbl_cpu.grid(row=1, column=0, pady=5)
+
+        self.progress_cpu = ctk.CTkProgressBar(self.frame_aba_sistema, width=300)
+        self.progress_cpu.set(0)
+        self.progress_cpu.grid(row=2, column=0, pady=5)
+
+        # Medidor de RAM
+        self.lbl_ram = ctk.CTkLabel(
+            self.frame_aba_sistema,
+            text="RAM: 0%",
+            font=ctk.CTkFont(size=14),
+        )
+        self.lbl_ram.grid(row=3, column=0, pady=(15, 5))
+
+        self.progress_ram = ctk.CTkProgressBar(self.frame_aba_sistema, width=300)
+        self.progress_ram.set(0)
+        self.progress_ram.grid(row=4, column=0, pady=5)
+
+        # Opções adicionais
+        self.switch_topmost = ctk.CTkSwitch(
+            self.frame_aba_sistema,
+            text="Manter Janela Sempre no Topo",
+            command=self.toggle_topmost,
+        )
+        self.switch_topmost.select()
+        self.switch_topmost.grid(row=5, column=0, pady=25)
+
+    def toggle_topmost(self):
+        estado = bool(self.switch_topmost.get())
+        self.attributes("-topmost", estado)
+        self.lbl_status_topmost.configure(
+            text=f"📌 Sempre no Topo: {'Ativo' if estado else 'Inativo'}"
         )
 
-        threading.Thread(
-            target=self._processar_pergunta_ia, args=(pergunta,), daemon=True
-        ).start()
+    def iniciar_monitoramento_sistema(self):
+        def atualizar_metricas():
+            while True:
+                if HAS_PSUTIL:
+                    cpu_usage = psutil.cpu_percent(interval=1)
+                    ram_usage = psutil.virtual_memory().percent
+                else:
+                    cpu_usage = 0
+                    ram_usage = 0
 
-    def ocultar_painel_ia(self):
-        self.frame_ia_resposta.pack_forget()
+                try:
+                    if HAS_PSUTIL:
+                        self.lbl_cpu.configure(text=f"CPU: {cpu_usage}%")
+                        self.progress_cpu.set(cpu_usage / 100.0)
 
-    def _processar_pergunta_ia(self, pergunta):
-        if self.client_gemini:
-            try:
-                response = self.client_gemini.models.generate_content(
-                    model="gemini-2.5-flash", contents=pergunta
-                )
-                resposta_texto = response.text
-            except Exception as e:
-                resposta_texto = f"Erro na requisição: {e}"
-        else:
-            resposta_texto = (
-                f"[Modo de Demonstração]\n\nPergunta: '{pergunta}'\n\n"
-                "Para respostas reais, adicione sua Chave de API na aba de Opções."
-            )
+                        self.lbl_ram.configure(text=f"RAM: {ram_usage}%")
+                        self.progress_ram.set(ram_usage / 100.0)
+                    else:
+                        self.lbl_cpu.configure(text="CPU: N/A (psutil ausente)")
+                        self.lbl_ram.configure(text="RAM: N/A (psutil ausente)")
+                except Exception:
+                    break
+                time.sleep(1)
 
-        self.txt_resposta_ia.delete("1.0", "end")
-        self.txt_resposta_ia.insert("1.0", resposta_texto)
+        t = threading.Thread(target=atualizar_metricas, daemon=True)
+        t.start()
 
-    def selecionar_foto_perfil(self):
-        caminho = filedialog.askopenfilename(
-            title="Escolha uma Foto",
-            filetypes=[("Imagens", "*.png *.jpg *.jpeg *.bmp")],
-        )
-        if caminho:
-            try:
-                img = Image.open(caminho).convert("RGBA").resize((42, 42))
-                mascara = Image.new("L", (42, 42), 0)
-                ImageDraw.Draw(mascara).ellipse((0, 0, 42, 42), fill=255)
-                res = Image.new("RGBA", (42, 42), (0, 0, 0, 0))
-                res.paste(img, (0, 0), mask=mascara)
-
-                avatar = ctk.CTkImage(
-                    light_image=res, dark_image=res, size=(42, 42)
-                )
-                self.lbl_avatar.configure(image=avatar, text="")
-            except Exception as e:
-                print(f"Erro ao carregar avatar: {e}")
-
-    def toggle_conta(self, chave):
-        self.accounts[chave] = not self.accounts[chave]
-        self.atualizar_botao_conta(chave)
-        self.salvar_configuracoes()
-
-    def atualizar_botao_conta(self, chave):
-        if chave not in self.btn_accounts:
-            return
-        btn = self.btn_accounts[chave]
-        conectado = self.accounts.get(chave, False)
-        cor_tema = COLOR_THEMES.get(self.cor_acento, COLOR_THEMES["azul"])
-
-        if conectado:
-            btn.configure(
-                text="Conectado",
-                fg_color="#FEE2E2",
-                hover_color="#FCA5A5",
-                text_color="#991B1B",
-            )
-        else:
-            btn.configure(
-                text="Conectar",
-                fg_color=cor_tema["primary"],
-                hover_color=cor_tema["hover"],
-                text_color="#FFFFFF",
-            )
-
-    def salvar_contas(self):
-        gemini_k = self.entry_gemini_key.get().strip()
-        nome_user = self.entry_nome_usuario.get().strip()
-
-        if gemini_k:
-            self.api_keys["gemini"] = gemini_k
-            os.environ["GEMINI_API_KEY"] = gemini_k
-            self.iniciar_gemini()
-
-        if nome_user:
-            self.lbl_artista.configure(text=f"Usuário: {nome_user}")
-
-        self.salvar_configuracoes()
-
-    def iniciar_gemini(self):
-        api_key = self.api_keys.get(
-            "gemini", os.environ.get("GEMINI_API_KEY", "")
-        )
-        if api_key:
-            try:
-                self.client_gemini = genai.Client(api_key=api_key)
-            except Exception as e:
-                print(f"Erro ao inicializar Gemini: {e}")
-
-    # -------------------------------------------------------------------------
-    # Persistência JSON e Atalhos
-    # -------------------------------------------------------------------------
-    def salvar_configuracoes(self):
-        dados = {
-            "modo_tema": self.modo_tema,
-            "cor_acento": self.cor_acento,
-            "accounts": self.accounts,
-            "api_keys": self.api_keys,
-        }
-        try:
-            with open(CONFIG_FILE, "w", encoding="utf-8") as f:
-                json.dump(dados, f, indent=4)
-        except Exception as e:
-            print(f"Erro ao salvar JSON: {e}")
-
-    def carregar_configuracoes(self):
-        if os.path.exists(CONFIG_FILE):
-            try:
-                with open(CONFIG_FILE, "r", encoding="utf-8") as f:
-                    dados = json.load(f)
-                    self.modo_tema = dados.get("modo_tema", "dark")
-                    self.cor_acento = dados.get("cor_acento", "azul")
-                    self.accounts = dados.get("accounts", self.accounts)
-                    self.api_keys = dados.get("api_keys", self.api_keys)
-            except Exception as e:
-                print(f"Erro ao ler JSON: {e}")
-
+    # ==========================================
+    # ATALHO GLOBAL (ALT + Z)
+    # ==========================================
     def alternar_visibilidade(self):
-        if self.visivel:
+        if self.visible:
             self.withdraw()
-            self.visivel = False
+            self.visible = False
         else:
             self.deiconify()
-            self.attributes("-topmost", True)
-            self.visivel = True
+            self.attributes("-topmost", self.switch_topmost.get() == 1)
+            self.visible = True
+
+    def iniciar_atalho_global(self):
+        def listener():
+            with keyboard.GlobalHotKeys(
+                {"<alt>+z": self.alternar_visibilidade}
+            ) as h:
+                h.join()
+
+        t = threading.Thread(target=listener, daemon=True)
+        t.start()
 
 
-def escutar_teclado(app):
-    teclas = set()
-
-    def on_press(key):
-        if key in (
-            keyboard.Key.alt_l,
-            keyboard.Key.alt_r,
-            keyboard.Key.alt_gr,
-        ) or (hasattr(key, "char") and key.char and key.char.lower() == "z"):
-            teclas.add(key)
-
-        tem_alt = any(
-            k in teclas
-            for k in (
-                keyboard.Key.alt_l,
-                keyboard.Key.alt_r,
-                keyboard.Key.alt_gr,
-            )
-        )
-        tem_z = any(
-            hasattr(k, "char") and k.char and k.char.lower() == "z" for k in teclas
-        )
-
-        if tem_alt and tem_z:
-            app.alternar_visibilidade()
-
-    def on_release(key):
-        teclas.discard(key)
-
-    with keyboard.Listener(
-        on_press=on_press, on_release=on_release
-    ) as listener:
-        listener.join()
-
-
+# --- PONTO DE ENTRADA DO PROGRAMA ---
 if __name__ == "__main__":
-    app = OmniOverlay()
-    thread_teclado = threading.Thread(
-        target=escutar_teclado, args=(app,), daemon=True
-    )
-    thread_teclado.start()
+    app = OmniOverlayApp()
     app.mainloop()

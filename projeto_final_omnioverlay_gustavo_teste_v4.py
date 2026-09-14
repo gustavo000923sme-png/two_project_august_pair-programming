@@ -455,7 +455,7 @@ class DashboardFrame(ctk.CTkFrame):
                     text=f"{ram.percent:.1f}% ({ram_usada_gb:.1f} GB / {ram_total_gb:.1f} GB)"
                 )
 
-                # Cor dinâmica da barra de progresso
+                # Cor dinámica da barra de progresso
                 cor_cpu = "#16A34A" if cpu_usage < 60 else ("#EAB308" if cpu_usage < 85 else "#EF4444")
                 self.bar_cpu_detalhada.configure(progress_color=cor_cpu)
 
@@ -863,360 +863,468 @@ class DashboardFrame(ctk.CTkFrame):
             border_color=COLOR_BORDER,
             border_width=1,
             corner_radius=8,
-            wrap="word",
             font=("Segoe UI", 11)
         )
         self.chat_history.pack(fill="both", expand=True, pady=(0, 8))
+        
+        # Mensagem inicial da IA
+        self.chat_history.insert("end", "OmniAI: Olá! Sou sua IA assistente. Como posso te ajudar hoje?\n\n")
         self.chat_history.configure(state="disabled")
 
-        # Mensagem inicial do assistente
-        self.adicionar_mensagem_chat("OmniAI", "Olá! Como posso ajudar você hoje?")
+        # Entrada de Texto para o usuário
+        frame_input = ctk.CTkFrame(container_ia, fg_color="transparent")
+        frame_input.pack(fill="x")
 
-        # Área de envio de mensagem
-        frame_input_ia = ctk.CTkFrame(container_ia, fg_color="transparent")
-        frame_input_ia.pack(fill="x")
-
-        self.entry_ia_prompt = ctk.CTkEntry(
-            frame_input_ia,
-            placeholder_text="Digite sua pergunta ou mensagem...",
-            height=40,
+        self.entry_chat = ctk.CTkEntry(
+            frame_input,
+            placeholder_text="Pergunte algo à IA ou peça ajuda para otimizar o PC...",
+            height=38,
             fg_color=COLOR_INPUT_BG,
             text_color=COLOR_TEXT_PRIMARY,
             border_color=COLOR_BORDER,
             font=("Segoe UI", 11)
         )
-        self.entry_ia_prompt.pack(side="left", fill="x", expand=True, padx=(0, 8))
-        self.entry_ia_prompt.bind("<Return>", lambda e: self.enviar_mensagem_ia())
+        self.entry_chat.pack(side="left", fill="x", expand=True, padx=(0, 8))
+        self.entry_chat.bind("<Return>", lambda e: self.enviar_mensagem_ia())
 
         btn_enviar_ia = ctk.CTkButton(
-            frame_input_ia,
+            frame_input,
             text="Enviar 🚀",
             width=90,
-            height=40,
-            corner_radius=8,
+            height=38,
+            fg_color="#2563EB",
+            hover_color="#1D4ED8",
             text_color="#FFFFFF",
             font=("Segoe UI", 11, "bold"),
             command=self.enviar_mensagem_ia
         )
         btn_enviar_ia.pack(side="right")
-        self.dynamic_accent_buttons.append(btn_enviar_ia)
-
-    def adicionar_mensagem_chat(self, remetente, texto):
-        """Adiciona uma nova mensagem formatada na caixa de conversa."""
-        self.chat_history.configure(state="normal")
-        self.chat_history.insert("end", f"[{remetente}]: {texto}\n\n")
-        self.chat_history.see("end")
-        self.chat_history.configure(state="disabled")
 
     def enviar_mensagem_ia(self):
-        """Processa a mensagem digitada pelo usuário e gera uma resposta da IA."""
-        mensagem = self.entry_ia_prompt.get().strip()
-        if not mensagem:
+        pergunta = self.entry_chat.get().strip()
+        if not pergunta:
             return
 
-        self.entry_ia_prompt.delete(0, "end")
-        self.adicionar_mensagem_chat("Você", mensagem)
+        self.entry_chat.delete(0, "end")
 
-        # Executa a geração da resposta em uma thread separada para não travar a interface
-        threading.Thread(target=self._processar_resposta_ia, args=(mensagem,), daemon=True).start()
+        self.chat_history.configure(state="normal")
+        self.chat_history.insert("end", f"Você: {pergunta}\n")
+        self.chat_history.configure(state="disabled")
+        self.chat_history.see("end")
 
-    def _processar_resposta_ia(self, mensagem):
-        """Simulação de processamento da IA (pode ser integrado a uma API externa como OpenAI/Gemini)."""
-        time.sleep(0.5)  # Efeito visual de carregamento
-        resposta = f"Recebi sua mensagem: '{mensagem}'. Integração com IA pronta para ser expandida!"
-        self.after(0, lambda: self.adicionar_mensagem_chat("OmniAI", resposta))
+        # Processa a resposta em thread para não travar a interface
+        threading.Thread(target=self.gerar_resposta_ia, args=(pergunta,), daemon=True).start()
 
-    # =========================================================================
-    # ABA 3: PLAYER DE VÍDEO INTEGRADO
-    # =========================================================================
-    def montar_aba_player_video(self):
-        """Monta o Player de Vídeo embutido."""
-        container_video = ctk.CTkFrame(self.tab_video, fg_color="transparent")
-        container_video.pack(fill="both", expand=True, padx=8, pady=8)
+    def gerar_resposta_ia(self, pergunta):
+        time.sleep(0.5) # Simula tempo de resposta/pensamento da IA
 
-        # Reprodutor de Vídeo
-        self.video_player = TkinterVideo(master=container_video, scaled=True)
-        self.video_player.pack(fill="both", expand=True, pady=(0, 8))
+        p_lower = pergunta.lower()
+        if "cpu" in p_lower or "otim" in p_lower or "desempenho" in p_lower:
+            resposta = "Para otimizar sua CPU:\n1. Feche guias desnecessárias do navegador.\n2. Verifique os processos nas Configurações do OmniOverlay.\n3. Certifique-se de que nenhum plano de energia limitante esteja ativo no Windows."
+        elif "atalho" in p_lower or "alt + z" in p_lower:
+            resposta = "O atalho 'Alt + Z' permite ocultar e exibir esta janela instantaneamente em cima de qualquer jogo ou aplicativo!"
+        elif "jogo" in p_lower or "fps" in p_lower:
+            resposta = "Dica de FPS: Mantenha seus drivers de vídeo atualizados e utilize o modo Cinema para assistir guias enquanto joga sem distrações."
+        else:
+            resposta = f"Entendi sua dúvida sobre '{pergunta}'. Posso ajudar a encontrar atalhos, verificar o uso da CPU ou otimizar seu uso de memória!"
 
-        # Controles do Player
-        frame_controles = ctk.CTkFrame(container_video, fg_color=COLOR_BG_CARD, corner_radius=8)
-        frame_controles.pack(fill="x")
-
-        btn_carregar = ctk.CTkButton(
-            frame_controles,
-            text="📁 Abrir Vídeo",
-            width=100,
-            height=32,
-            fg_color=("#CBD5E1", "#334155"),
-            text_color=COLOR_TEXT_PRIMARY,
-            command=self.carregar_arquivo_video
-        )
-        btn_carregar.pack(side="left", padx=8, pady=8)
-
-        btn_play = ctk.CTkButton(
-            frame_controles,
-            text="▶️ Play",
-            width=70,
-            height=32,
-            fg_color="#16A34A",
-            hover_color="#15803D",
-            text_color="#FFFFFF",
-            command=lambda: self.video_player.play()
-        )
-        btn_play.pack(side="left", padx=4, pady=8)
-
-        btn_pause = ctk.CTkButton(
-            frame_controles,
-            text="⏸️ Pause",
-            width=70,
-            height=32,
-            fg_color=("#CBD5E1", "#334155"),
-            text_color=COLOR_TEXT_PRIMARY,
-            command=lambda: self.video_player.pause()
-        )
-        btn_pause.pack(side="left", padx=4, pady=8)
-
-        btn_stop = ctk.CTkButton(
-            frame_controles,
-            text="⏹️ Stop",
-            width=70,
-            height=32,
-            fg_color="#EF4444",
-            hover_color="#DC2626",
-            text_color="#FFFFFF",
-            command=lambda: self.video_player.stop()
-        )
-        btn_stop.pack(side="left", padx=4, pady=8)
-
-    def carregar_arquivo_video(self):
-        """Abre caixa de diálogo para carregar um arquivo de mídia no player."""
-        caminho = filedialog.askopenfilename(
-            title="Selecione um Arquivo de Vídeo",
-            filetypes=[("Arquivos de Vídeo", "*.mp4 *.avi *.mkv *.mov *.wmv"), ("Todos os Arquivos", "*.*")]
-        )
-        if caminho:
-            self.video_player.load(caminho)
-            self.video_player.play()
+        self.chat_history.configure(state="normal")
+        self.chat_history.insert("end", f"OmniAI: {resposta}\n\n")
+        self.chat_history.configure(state="disabled")
+        self.chat_history.see("end")
 
     # =========================================================================
-    # ABA 4: CONFIGURAÇÕES E MONITOR DE RECURSOS DETALHADO
+    # MÉTODOS DE SUPORTE AO HUB
     # =========================================================================
-    def montar_aba_config(self):
-        """Monta o painel detalhado de Hardware e Opções de Tema."""
-        scroll_config = ctk.CTkScrollableFrame(self.tab_config, fg_color="transparent")
-        scroll_config.pack(fill="both", expand=True, padx=4, pady=4)
-
-        # Painel de Hardware / Monitor de Desempenho
-        frame_hw_detalhado = ctk.CTkFrame(scroll_config, fg_color=COLOR_BG_CARD, corner_radius=10)
-        frame_hw_detalhado.pack(fill="x", pady=8, padx=4)
-
-        ctk.CTkLabel(
-            frame_hw_detalhado,
-            text="📊 Monitor de Hardware em Tempo Real",
-            font=("Segoe UI", 12, "bold"),
-            text_color=COLOR_TEXT_PRIMARY
-        ).pack(anchor="w", padx=12, pady=(10, 6))
-
-        # CPU Status
-        lbl_cpu_txt = ctk.CTkLabel(frame_hw_detalhado, text="Uso do Processador (CPU):", font=("Segoe UI", 11), text_color=COLOR_TEXT_PRIMARY)
-        lbl_cpu_txt.pack(anchor="w", padx=12, pady=(4, 0))
-
-        frame_bar_cpu = ctk.CTkFrame(frame_hw_detalhado, fg_color="transparent")
-        frame_bar_cpu.pack(fill="x", padx=12, pady=(2, 8))
-
-        self.bar_cpu_detalhada = ctk.CTkProgressBar(frame_bar_cpu, height=14, corner_radius=7)
-        self.bar_cpu_detalhada.pack(side="left", fill="x", expand=True, padx=(0, 8))
-        self.bar_cpu_detalhada.set(0)
-
-        self.lbl_cpu_valor_detalhado = ctk.CTkLabel(frame_bar_cpu, text="0%", font=("Segoe UI", 11, "bold"), text_color=COLOR_TEXT_PRIMARY, width=50)
-        self.lbl_cpu_valor_detalhado.pack(side="right")
-
-        # RAM Status
-        lbl_ram_txt = ctk.CTkLabel(frame_hw_detalhado, text="Memória RAM Usada:", font=("Segoe UI", 11), text_color=COLOR_TEXT_PRIMARY)
-        lbl_ram_txt.pack(anchor="w", padx=12, pady=(4, 0))
-
-        frame_bar_ram = ctk.CTkFrame(frame_hw_detalhado, fg_color="transparent")
-        frame_bar_ram.pack(fill="x", padx=12, pady=(2, 12))
-
-        self.bar_ram_detalhada = ctk.CTkProgressBar(frame_bar_ram, height=14, corner_radius=7)
-        self.bar_ram_detalhada.pack(side="left", fill="x", expand=True, padx=(0, 8))
-        self.bar_ram_detalhada.set(0)
-
-        self.lbl_ram_valor_detalhado = ctk.CTkLabel(frame_bar_ram, text="0%", font=("Segoe UI", 11, "bold"), text_color=COLOR_TEXT_PRIMARY, width=150)
-        self.lbl_ram_valor_detalhado.pack(side="right")
-
-        # Seleção da Cor de Acento do Tema
-        frame_cores = ctk.CTkFrame(scroll_config, fg_color=COLOR_BG_CARD, corner_radius=10)
-        frame_cores.pack(fill="x", pady=8, padx=4)
-
-        ctk.CTkLabel(
-            frame_cores,
-            text="🎨 Personalização do Tema e Cores",
-            font=("Segoe UI", 12, "bold"),
-            text_color=COLOR_TEXT_PRIMARY
-        ).pack(anchor="w", padx=12, pady=(10, 6))
-
-        frame_botoes_cor = ctk.CTkFrame(frame_cores, fg_color="transparent")
-        frame_botoes_cor.pack(fill="x", padx=12, pady=(4, 12))
-
-        for nome_cor, dados in COLOR_ACCENTS.items():
-            btn_c = ctk.CTkButton(
-                frame_botoes_cor,
-                text=nome_cor.capitalize(),
-                width=80,
-                height=32,
-                corner_radius=6,
-                fg_color=dados["primary"],
-                hover_color=dados["hover"],
-                text_color="#FFFFFF",
-                font=("Segoe UI", 10, "bold"),
-                command=lambda c=nome_cor: self.aplicar_cor_acento(c)
-            )
-            btn_c.pack(side="left", padx=4)
-
-    # =========================================================================
-    # FUNÇÕES AUXILIARES DE EXECUÇÃO E GRID
-    # =========================================================================
-    def criar_cards_grid(self, parent_scroll, lista_items):
-        """Cria e organiza os cartões de atalhos estáticos em grid responsivo."""
-        frame_grid = ctk.CTkFrame(parent_scroll, fg_color="transparent")
-        frame_grid.pack(fill="x", pady=4)
-
-        for nome, alvo, cor in lista_items:
-            btn = ctk.CTkButton(
-                frame_grid,
-                text=nome,
-                height=40,
-                corner_radius=8,
-                fg_color=COLOR_BG_CARD,
-                hover_color=("#CBD5E1", "#334155"),
-                text_color=COLOR_TEXT_PRIMARY,
-                border_color=COLOR_BORDER,
-                border_width=1,
-                font=("Segoe UI", 11, "bold"),
-                anchor="w",
-                command=lambda a=alvo: self.abrir_inteligente(a)
-            )
-            btn.pack(fill="x", pady=3, padx=4)
-
     def selecionar_executavel_direto(self):
-        """Permite ao usuário escolher um arquivo executável para abrir diretamente."""
         caminho = filedialog.askopenfilename(
-            title="Selecione um Executável",
-            filetypes=[("Executáveis e Atalhos", "*.exe *.lnk *.bat *.cmd"), ("Todos os Arquivos", "*.*")]
+            title="Escolha um Executável ou Arquivo",
+            filetypes=[("Executáveis", "*.exe *.lnk *.bat"), ("Todos os arquivos", "*.*")]
         )
         if caminho:
             self.entry_universal.delete(0, "end")
             self.entry_universal.insert(0, caminho)
 
     def executar_busca_universal(self):
-        """Executa a entrada digitada na barra de busca universal."""
         alvo = self.entry_universal.get().strip()
         if alvo:
             self.abrir_inteligente(alvo)
 
     def abrir_inteligente(self, alvo):
-        """Abre com inteligência links Web, URIs do sistema ou arquivos locais/programas."""
-        if not alvo:
-            return
+        alvo_limpo = alvo.strip()
 
+        if os.path.exists(alvo_limpo):
+            try:
+                os.startfile(alvo_limpo)
+                return
+            except Exception:
+                try:
+                    subprocess.Popen([alvo_limpo], shell=True)
+                    return
+                except Exception as e:
+                    print(f"[ERRO] Erro ao abrir executável: {e}")
+
+        if alvo_limpo.startswith("http://") or alvo_limpo.startswith("https://") or alvo_limpo.startswith("steam://") or alvo_limpo.startswith("ms-settings:"):
+            webbrowser.open(alvo_limpo)
+        elif "." in alvo_limpo and " " not in alvo_limpo:
+            webbrowser.open(f"https://{alvo_limpo}")
+        else:
+            try:
+                os.startfile(alvo_limpo)
+            except Exception:
+                query_encoded = urllib.parse.quote_plus(alvo_limpo)
+                webbrowser.open(f"https://www.google.com/search?q={query_encoded}")
+
+    def criar_cards_grid(self, frame_pai, lista_atalhos):
+        col, row = 0, 0
+        for nome, url, cor in lista_atalhos:
+            btn = ctk.CTkButton(
+                frame_pai,
+                text=nome,
+                height=48,
+                corner_radius=8,
+                fg_color=COLOR_BG_CARD,
+                hover_color=cor,
+                text_color=COLOR_TEXT_PRIMARY,
+                font=("Segoe UI", 11, "bold"),
+                command=lambda u=url: self.abrir_inteligente(u),
+            )
+            btn.grid(row=row, column=col, padx=4, pady=4, sticky="nsew")
+
+            col += 1
+            if col > 2:
+                col = 0
+                row += 1
+
+        for i in range(3):
+            frame_pai.grid_columnconfigure(i, weight=1)
+
+    # =========================================================================
+    # ABA 3: PLAYER DE VÍDEO
+    # =========================================================================
+    def montar_aba_player_video(self):
+        """Aba com Reprodutor de Mídia integrado."""
+        frame_top_video = ctk.CTkFrame(self.tab_video, fg_color="transparent")
+        frame_top_video.pack(fill="x", padx=12, pady=10)
+
+        self.entry_video_url = ctk.CTkEntry(
+            frame_top_video,
+            placeholder_text="Selecione um arquivo de vídeo (.mp4, .mkv, .avi)...",
+            height=38,
+            fg_color=COLOR_INPUT_BG,
+            text_color=COLOR_TEXT_PRIMARY,
+            border_color=COLOR_BORDER,
+            font=("Segoe UI", 11),
+        )
+        self.entry_video_url.pack(side="left", fill="x", expand=True, padx=(0, 8))
+
+        btn_arquivo_local = ctk.CTkButton(
+            frame_top_video,
+            text="📁 Abrir Vídeo",
+            width=110,
+            height=38,
+            fg_color=("#CBD5E1", "#334155"),
+            text_color=COLOR_TEXT_PRIMARY,
+            command=self.selecionar_video_local,
+        )
+        btn_arquivo_local.pack(side="right", padx=(0, 6))
+
+        btn_play = ctk.CTkButton(
+            frame_top_video,
+            text="▶️ Play",
+            width=80,
+            height=38,
+            fg_color="#16A34A",
+            hover_color="#15803D",
+            text_color="#FFFFFF",
+            font=("Segoe UI", 11, "bold"),
+            command=self.reproduzir_video,
+        )
+        btn_play.pack(side="right", padx=(0, 4))
+
+        btn_pause = ctk.CTkButton(
+            frame_top_video,
+            text="⏸️ Pausar",
+            width=80,
+            height=38,
+            fg_color="#9333EA",
+            hover_color="#7E22CE",
+            text_color="#FFFFFF",
+            font=("Segoe UI", 11, "bold"),
+            command=self.pausar_video,
+        )
+        btn_pause.pack(side="right")
+
+        self.frame_screen = ctk.CTkFrame(
+            self.tab_video,
+            fg_color=("#1E293B", "#0F172A"),
+            corner_radius=12,
+            border_color=COLOR_BORDER,
+            border_width=1,
+        )
+        self.frame_screen.pack(fill="both", expand=True, padx=12, pady=(0, 10))
+
+        self.videoplayer = TkinterVideo(master=self.frame_screen, scaled=True)
+        self.videoplayer.pack(fill="both", expand=True, padx=10, pady=10)
+
+    def selecionar_video_local(self):
+        caminho = filedialog.askopenfilename(
+            title="Escolha um arquivo de Vídeo",
+            filetypes=[("Vídeos", "*.mp4 *.avi *.mov *.mkv"), ("Todos os Arquivos", "*.*")]
+        )
+        if caminho:
+            self.entry_video_url.delete(0, "end")
+            self.entry_video_url.insert(0, caminho)
+            self.carregar_e_tocar_video(caminho)
+
+    def carregar_e_tocar_video(self, caminho):
+        if os.path.exists(caminho):
+            self.videoplayer.load(caminho)
+            self.videoplayer.play()
+
+    def reproduzir_video(self):
+        caminho = self.entry_video_url.get().strip()
+        if os.path.exists(caminho):
+            self.videoplayer.play()
+
+    def pausar_video(self):
+        self.videoplayer.pause()
+
+    # =========================================================================
+    # ABA 4: CONFIGURAÇÕES E MONITOR DE DESEMPENHO EXPANDIDO (MAIOR)
+    # =========================================================================
+    def montar_aba_config(self):
+        container = ctk.CTkScrollableFrame(self.tab_config, fg_color="transparent")
+        container.pack(fill="both", expand=True, padx=12, pady=12)
+
+        # SEÇÃO 1: MONITOR DE CPU E RECURSOS EXPANDIDO E DETALHADO
+        ctk.CTkLabel(
+            container,
+            text="📊 Monitor de Recursos e Desempenho (CPU / RAM)",
+            font=("Segoe UI", 14, "bold"),
+            text_color=COLOR_TEXT_PRIMARY
+        ).pack(anchor="w", pady=(4, 8))
+
+        card_hardware = ctk.CTkFrame(
+            container,
+            fg_color=COLOR_BG_CARD,
+            corner_radius=10,
+            border_color=COLOR_BORDER,
+            border_width=1
+        )
+        card_hardware.pack(fill="x", pady=(0, 16), ipady=8)
+
+        # CPU Detalhada
+        frame_cpu_det = ctk.CTkFrame(card_hardware, fg_color="transparent")
+        frame_cpu_det.pack(fill="x", padx=12, pady=6)
+
+        ctk.CTkLabel(
+            frame_cpu_det,
+            text="⚡ Uso da CPU:",
+            font=("Segoe UI", 11, "bold"),
+            text_color=COLOR_TEXT_PRIMARY
+        ).pack(side="left")
+
+        self.lbl_cpu_valor_detalhado = ctk.CTkLabel(
+            frame_cpu_det,
+            text="0%",
+            font=("Segoe UI", 11, "bold"),
+            text_color=("#2563EB", "#60A5FA")
+        )
+        self.lbl_cpu_valor_detalhado.pack(side="right")
+
+        self.bar_cpu_detalhada = ctk.CTkProgressBar(card_hardware, height=14, corner_radius=7)
+        self.bar_cpu_detalhada.pack(fill="x", padx=12, pady=(0, 10))
+        self.bar_cpu_detalhada.set(0)
+
+        # RAM Detalhada
+        frame_ram_det = ctk.CTkFrame(card_hardware, fg_color="transparent")
+        frame_ram_det.pack(fill="x", padx=12, pady=6)
+
+        ctk.CTkLabel(
+            frame_ram_det,
+            text="💾 Memória RAM:",
+            font=("Segoe UI", 11, "bold"),
+            text_color=COLOR_TEXT_PRIMARY
+        ).pack(side="left")
+
+        self.lbl_ram_valor_detalhado = ctk.CTkLabel(
+            frame_ram_det,
+            text="0%",
+            font=("Segoe UI", 11, "bold"),
+            text_color=("#16A34A", "#4ADE80")
+        )
+        self.lbl_ram_valor_detalhado.pack(side="right")
+
+        self.bar_ram_detalhada = ctk.CTkProgressBar(card_hardware, height=14, corner_radius=7)
+        self.bar_ram_detalhada.pack(fill="x", padx=12, pady=(0, 10))
+        self.bar_ram_detalhada.set(0)
+
+        # Informações Extras de Disco e Processos
         try:
-            if alvo.startswith(("http://", "https://")):
-                webbrowser.open(alvo)
-            elif ":" in alvo and not os.path.exists(alvo) and not alvo.endswith(".exe"):
-                # Protocolos URIs como ms-settings: ou steam://
-                os.startfile(alvo)
-            elif os.path.exists(alvo) or alvo.endswith(".exe"):
-                subprocess.Popen(alvo)
-            else:
-                # Caso seja uma busca simples, pesquisa no navegador padrão
-                webbrowser.open(f"https://www.google.com/search?q={urllib.parse.quote(alvo)}")
-        except Exception as e:
-            print(f"[ERRO] Falha ao abrir '{alvo}': {e}")
+            num_processos = len(psutil.pids())
+            disco = psutil.disk_usage('/')
+            disco_usado_gb = disco.used / (1024**3)
+            disco_total_gb = disco.total / (1024**3)
+
+            lbl_extra = ctk.CTkLabel(
+                card_hardware,
+                text=f"⚙️ Processos Ativos: {num_processos}  |  💽 Armazenamento C: {disco.percent}% ({disco_usado_gb:.0f}/{disco_total_gb:.0f} GB)",
+                font=("Segoe UI", 10),
+                text_color=COLOR_TEXT_SECONDARY
+            )
+            lbl_extra.pack(anchor="w", padx=12, pady=(4, 2))
+        except Exception:
+            pass
+
+        # SEÇÃO 2: CUSTOMIZAÇÃO DE CORES
+        ctk.CTkLabel(
+            container,
+            text="🎨 Cor de Destaque",
+            font=("Segoe UI", 13, "bold"),
+            text_color=COLOR_TEXT_PRIMARY
+        ).pack(anchor="w", pady=(8, 4))
+
+        frame_cores = ctk.CTkFrame(container, fg_color="transparent")
+        frame_cores.pack(fill="x", pady=(0, 16))
+
+        for nome, dados in COLOR_ACCENTS.items():
+            btn_cor = ctk.CTkButton(
+                frame_cores,
+                text=nome.capitalize(),
+                fg_color=dados["primary"],
+                hover_color=dados["hover"],
+                text_color="#FFFFFF",
+                width=90,
+                height=32,
+                font=("Segoe UI", 10, "bold"),
+                command=lambda n=nome: self.aplicar_cor_acento(n)
+            )
+            btn_cor.pack(side="left", padx=4)
+
+        # SEÇÃO 3: INFORMAÇÃO DO ATALHO GLOBAL
+        ctk.CTkLabel(
+            container,
+            text="⌨️ Atalho Global Teclado",
+            font=("Segoe UI", 13, "bold"),
+            text_color=COLOR_TEXT_PRIMARY
+        ).pack(anchor="w", pady=(8, 4))
+
+        lbl_info_atalho = ctk.CTkLabel(
+            container,
+            text="Pressione 'Alt + Z' a qualquer momento para ocultar ou exibir a janela principal.",
+            font=("Segoe UI", 11),
+            text_color=COLOR_TEXT_SECONDARY
+        )
+        lbl_info_atalho.pack(anchor="w", padx=4)
 
 
 class OmniOverlayApp(ctk.CTk):
-    """Classe principal da Aplicação Gerenciadora de Telas e Estado Global."""
+    """Classe Principal de Aplicação / Controlador."""
 
     def __init__(self):
         super().__init__()
 
-        # Configurações Iniciais da Janela principal sem bordas (Style Overlay)
         self.overrideredirect(True)
         self.attributes("-topmost", True)
         self.attributes("-alpha", 0.98)
-        self.title("OmniOverlay Engine")
 
-        # Carregar Dados de Configuração
         self.dados_config = AccountManager.carregar_dados()
         self.modo_tema_atual = self.dados_config.get("modo_tema", "dark")
         ctk.set_appearance_mode(self.modo_tema_atual)
 
         self.perfil_ativo = None
+        self.visivel = True
         self.centralizar_janela(920, 800)
 
-        # Container Principal
         self.container = ctk.CTkFrame(self, fg_color="transparent")
         self.container.pack(fill="both", expand=True)
-        self.container.grid_rowconfigure(0, weight=1)
-        self.container.grid_columnconfigure(0, weight=1)
 
-        # Telas da Aplicação
-        self.frame_seletor = ProfileSelectorFrame(self.container, self)
+        self.frame_selector = ProfileSelectorFrame(self.container, self)
         self.frame_dashboard = DashboardFrame(self.container, self)
 
-        self.frame_seletor.grid(row=0, column=0, sticky="nsew")
-        self.frame_dashboard.grid(row=0, column=0, sticky="nsew")
-
-        # Iniciar na Tela Correta
-        ultimo_id = self.dados_config.get("ultimo_perfil", "")
-        perfil_encontrado = None
-
-        for p in self.dados_config.get("perfis", []):
-            if p["id"] == ultimo_id:
-                perfil_encontrado = p
-                break
+        ultimo_id = self.dados_config.get("ultimo_perfil")
+        perfil_encontrado = next((p for p in self.dados_config["perfis"] if p["id"] == ultimo_id), None)
 
         if perfil_encontrado:
             self.entrar_no_perfil(perfil_encontrado)
         else:
             self.abrir_seletor_perfis()
 
+        # Inicia a captura do atalho Alt + Z
+        self.iniciar_listener_atalho()
+
+    def alternar_visibilidade(self):
+        """Oculta ou exibe a janela principal."""
+        if self.visivel:
+            self.withdraw()
+            self.visivel = False
+        else:
+            self.deiconify()
+            self.lift()
+            self.attributes("-topmost", True)
+            self.visivel = True
+
+    def iniciar_listener_atalho(self):
+        """Monitora as teclas Alt + Z em uma thread separada."""
+        def escutar():
+            pressionados = set()
+
+            def on_press(key):
+                pressionados.add(key)
+                alt_pressionado = (keyboard.Key.alt_l in pressionados or 
+                                   keyboard.Key.alt_r in pressionados or 
+                                   keyboard.Key.alt in pressionados)
+                z_pressionado = False
+
+                if isinstance(key, keyboard.KeyCode) and key.char:
+                    if key.char.lower() == 'z':
+                        z_pressionado = True
+
+                if alt_pressionado and z_pressionado:
+                    self.after(0, self.alternar_visibilidade)
+
+            def on_release(key):
+                if key in pressionados:
+                    pressionados.remove(key)
+
+            with keyboard.Listener(on_press=on_press, on_release=on_release) as listener:
+                listener.join()
+
+        thread = threading.Thread(target=escutar, daemon=True)
+        thread.start()
+
     def centralizar_janela(self, largura, altura):
-        """Centraliza a janela na tela principal."""
-        self.update_idletasks()
         ws = self.winfo_screenwidth()
         hs = self.winfo_screenheight()
         x = (ws // 2) - (largura // 2)
         y = (hs // 2) - (altura // 2)
         self.geometry(f"{largura}x{altura}+{x}+{y}")
 
+    def alternar_tema_global(self):
+        novo_modo = "light" if self.modo_tema_atual == "dark" else "dark"
+        self.modo_tema_atual = novo_modo
+        ctk.set_appearance_mode(novo_modo)
+
+        self.dados_config["modo_tema"] = novo_modo
+        AccountManager.salvar_dados(self.dados_config)
+
+        texto_btn = "☀️" if novo_modo == "dark" else "🌙"
+        self.frame_dashboard.btn_tema.configure(text=texto_btn)
+
     def abrir_seletor_perfis(self):
-        """Exibe a tela de seleção de perfil."""
-        self.frame_seletor.atualizar_lista()
-        self.frame_seletor.tkraise()
+        self.frame_dashboard.pack_forget()
+        self.frame_selector.atualizar_lista()
+        self.frame_selector.pack(fill="both", expand=True)
 
     def entrar_no_perfil(self, perfil):
-        """Realiza a troca para o perfil ativo selecionado."""
         self.perfil_ativo = perfil
         self.dados_config["ultimo_perfil"] = perfil["id"]
         AccountManager.salvar_dados(self.dados_config)
 
+        self.frame_selector.pack_forget()
         self.frame_dashboard.carregar_perfil(perfil)
-        self.frame_dashboard.tkraise()
-
-    def alternar_tema_global(self):
-        """Alterna globalmente entre o modo claro e escuro."""
-        if self.modo_tema_atual == "dark":
-            self.modo_tema_atual = "light"
-            self.frame_dashboard.btn_tema.configure(text="🌙")
-        else:
-            self.modo_tema_atual = "dark"
-            self.frame_dashboard.btn_tema.configure(text="☀️")
-
-        ctk.set_appearance_mode(self.modo_tema_atual)
-        self.dados_config["modo_tema"] = self.modo_tema_atual
-        AccountManager.salvar_dados(self.dados_config)
+        self.frame_dashboard.pack(fill="both", expand=True)
 
 
 if __name__ == "__main__":
